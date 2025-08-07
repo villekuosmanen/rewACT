@@ -430,7 +430,6 @@ class ACT(nn.Module):
                 nn.ReLU(),
                 nn.Linear(config.dim_model // 4, 1),
                 nn.Sigmoid(),
-                # No activation - let the network learn the full range naturally
             )
 
         self._reset_parameters()
