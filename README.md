@@ -44,11 +44,11 @@ You can use the rewACT model like any ACT model, you only need to add a second r
 
 Kind of. Here's a demo from one of my datasets - the rewACT model was trained on 25 episodes, with the episode in the demo being unseen during training.
 
-![Pepsi stacking demo](https://github.com/villekuosmanen/rewACT/raw/refs/heads/main/videos/pepsi_cans_rewards.mp4)
+![Pepsi stacking demo](https://github.com/villekuosmanen/rewACT/blob/main/videos/pepsi_cans_rewards.gif?raw=true)
 
 Because this method is supervised, it doesn't generalise well outside distribution (like ACT in general). A reward model trained with successful episodes only isn't able to handle failed scenarios well either - to do this we need data with failures (e.g. eval data) labelled with moments where the reward falls to zero. This process requires more human engineering effort but can deliver cool results like this.
 
-![Dice tower demo](https://github.com/villekuosmanen/rewACT/raw/refs/heads/main/videos/dice_tower_rewards.mp4)
+![Dice tower demo](https://github.com/villekuosmanen/rewACT/blob/main/videos/dice_tower_rewards.gif?raw=true)
 
 Reward models also struggle to tell between a success and failure if the beginning and end of the task look the same. An example of this is a self-resetting task like the one in the above demo.
 
