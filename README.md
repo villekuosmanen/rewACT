@@ -29,7 +29,7 @@ The linear interpolation method is not the most accurate - we can improve the me
 
 ## How do I use it?
 
-To use rewACT, replace the following files inside `lerobot` with the versions shown here (valid since 5th of August). Alternatively, [merge this pull request to your fork]() or apply the changes manually to your fork. The main changes are:
+To use rewACT, replace the following files inside `lerobot` with the versions shown here (valid since 5th of August). Alternatively, [merge this pull request to your fork](https://github.com/huggingface/lerobot/pull/1696) or apply the changes manually to your fork. The main changes are:
 
 1. A method for inferring a dense reward based on episode progress.
 2. A reward prediction head bolt-on to the ACT transformer model.
