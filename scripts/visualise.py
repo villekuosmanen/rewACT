@@ -8,19 +8,17 @@ By default, analyzes all episodes in the dataset.
 
 import argparse
 import os
-import time
-import subprocess
 from typing import Dict, Tuple
 
 import numpy as np
 import torch
 from tqdm import tqdm
 
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.policies.factory import make_policy
+from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.common.policies.factory import make_policy
 from lerobot.configs.policies import PreTrainedConfig
 
-from src.reward_wrapper import ACTPolicyWithReward, create_reward_visualization_video
+from reward_wrapper import ACTPolicyWithReward, create_reward_visualization_video
 
 
 def none_or_int(value):
@@ -254,14 +252,9 @@ def main():
     print(f"Using device: {device}")
     
     # Load dataset
-    try:
-        dataset = LeRobotDataset(args.dataset_repo_id)
-        print(f"Dataset loaded successfully. Total episodes: {dataset.num_episodes}")
-        
-    except Exception as e:
-        print(f"Error loading dataset: {e}")
-        return
-    
+    dataset = LeRobotDataset(args.dataset_repo_id)
+    print(f"Dataset loaded successfully. Total episodes: {dataset.num_episodes}")
+
     # Determine which episodes to analyze
     if args.episode_id is not None:
         # Single episode analysis
@@ -275,48 +268,32 @@ def main():
         print(f"Will analyze all {dataset.num_episodes} episodes")
     
     # Load policy
-    try:
-        print("Loading policy...")
-        policy, policy_cfg = load_policy(
-            args.policy_path,
-            dataset.meta,
-            args.policy_overrides
-        )
-        
-        if hasattr(policy, 'model'):
-            policy.model.eval()
-            policy.model.to(device)
-        elif hasattr(policy, 'eval'):
-            policy.eval()
-            
-        print("Policy loaded successfully")
-        
-    except Exception as e:
-        print(f"Error loading policy: {e}")
-        return
+    print("Loading policy...")
+    policy, _ = load_policy(
+        args.policy_path,
+        dataset.meta,
+        args.policy_overrides
+    )
     
-    # Run analysis on all specified episodes
-    failed_episodes = []
+    if hasattr(policy, 'model'):
+        policy.model.eval()
+        policy.model.to(device)
+    elif hasattr(policy, 'eval'):
+        policy.eval()
+        
+    print("Policy loaded successfully")
     
     for episode_id in tqdm(episodes_to_analyze, desc="Analyzing episodes"):
-        try:
-            print(f"\nStarting analysis of episode {episode_id}...")
-            analyze_episode(
-                dataset=dataset,
-                policy=policy,
-                episode_id=episode_id,
-                device=device,
-                output_dir=args.output_dir,
-                model_dtype=model_dtype
-            )
-            print(f"Episode {episode_id} analysis completed successfully")
+        print(f"\nStarting analysis of episode {episode_id}...")
+        analyze_episode(
+            dataset=dataset,
+            policy=policy,
+            episode_id=episode_id,
+            device=device,
+            output_dir=args.output_dir,
+            model_dtype=model_dtype
+        )
+        print(f"Episode {episode_id} analysis completed successfully")
             
-        except Exception as e:
-            print(f"Error analyzing episode {episode_id}: {e}")
-            failed_episodes.append(episode_id)
-            import traceback
-            traceback.print_exc()
-            continue
-
 if __name__ == "__main__":
     main()
