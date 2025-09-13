@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rewact"
-version = "0.1.1"
+version = "0.1.2"
 description = "RewACT: Reward-Augmented Action Chunking with Transformers"
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -23,8 +23,6 @@ classifiers = [
 requires-python = ">=3.10"
 dependencies = [
     "lerobot",
-    "torch>=2.2.1,<2.8.0",
-    "torchvision>=0.21.0,<0.23.0",
     "einops>=0.6.0",
 ]
 
@@ -55,6 +53,10 @@ Homepage = "https://github.com/villekuosmanen/rewACT"
 Repository = "https://github.com/villekuosmanen/rewACT"
 Documentation = "https://github.com/villekuosmanen/rewACT"
 "Bug Tracker" = "https://github.com/villekuosmanen/rewACT/issues"
+
+# Note: PyTorch dependencies are handled by lerobot to avoid index resolution issues
+# If you need to install PyTorch manually, use:
+# pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu118
 
 [tool.setuptools.packages.find]
 where = ["."]
