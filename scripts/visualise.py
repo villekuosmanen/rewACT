@@ -8,20 +8,19 @@ By default, analyzes all episodes in the dataset.
 
 import argparse
 import os
-import time
-import subprocess
 from typing import Dict, Tuple
 
 import numpy as np
 import torch
 from tqdm import tqdm
 
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.policies.factory import make_policy
 from lerobot.configs.policies import PreTrainedConfig
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
-from src.reward_wrapper import ACTPolicyWithReward, create_reward_visualization_video
-
+from reward_wrapper import ACTPolicyWithReward, create_reward_visualization_video
+from rewact.policy import RewACTConfig
+from rewact.policy import RewACTPolicy
+from rewact.utils import make_rewact_policy
 
 def none_or_int(value):
     if value == "None":
@@ -43,8 +42,8 @@ def load_policy(policy_path: str, dataset_meta, policy_overrides: list = None) -
         policy_cfg = PreTrainedConfig.from_pretrained(policy_path)
         policy_cfg.pretrained_path = policy_path
 
-    # NOTE: policy has to be an ACT policy for this to work
-    policy = make_policy(policy_cfg, ds_meta=dataset_meta)
+    # Create RewACT policy using the utility function
+    policy = make_rewact_policy(policy_cfg, dataset_meta)
     policy = ACTPolicyWithReward(policy)
         
     return policy, policy_cfg
@@ -115,12 +114,13 @@ def prepare_observation_for_policy(frame: dict,
     
     return observation
 
-def analyze_episode(dataset: LeRobotDataset,
-                   policy,
-                   episode_id: int,
-                   device: torch.device,
-                   output_dir: str,
-                   model_dtype: torch.dtype = torch.float32) -> Dict:
+def analyze_episode(
+    dataset: LeRobotDataset,
+    policy,
+    episode_id: int,
+    device: torch.device,
+    model_dtype: torch.dtype = torch.float32
+) -> Dict:
     """
     Run policy inference on an episode and analyze proprioceptive importance.
     
@@ -202,12 +202,9 @@ def analyze_episode(dataset: LeRobotDataset,
                 action = policy(observation)
                 
         timestamp_counter +=1
-    
-    # Generate output files
-    os.makedirs(output_dir, exist_ok=True)
-    
+        
     if reward_data and reward_images:
-        output_filename_reward = f"reward_visualization.mp4"
+        output_filename_reward = f"outputs/reward_visualization.mp4"
         create_reward_visualization_video(reward_images, reward_data, output_filename_reward, fps=20)
         
         # Print reward statistics
@@ -220,6 +217,8 @@ def analyze_episode(dataset: LeRobotDataset,
         print(f"  Final: {rewards[-1]:.3f}")
 
     print("Video encoding process finished.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Analyze policy behavior on dataset episodes")
     parser.add_argument("--dataset-repo-id", type=str, required=True,
@@ -228,8 +227,6 @@ def main():
                         help="Episode ID to analyze (if not specified, analyzes all episodes)")
     parser.add_argument("--policy-path", type=str, required=True,
                         help="Path to the policy checkpoint")
-    parser.add_argument("--output-dir", type=str, default="./analysis_output",
-                        help="Directory to save analysis results")
     parser.add_argument("--policy-overrides", type=str, nargs="*",
                         help="Policy config overrides in key=value format")
     parser.add_argument("--device", type=str, default="cuda",
@@ -254,14 +251,9 @@ def main():
     print(f"Using device: {device}")
     
     # Load dataset
-    try:
-        dataset = LeRobotDataset(args.dataset_repo_id)
-        print(f"Dataset loaded successfully. Total episodes: {dataset.num_episodes}")
-        
-    except Exception as e:
-        print(f"Error loading dataset: {e}")
-        return
-    
+    dataset = LeRobotDataset(args.dataset_repo_id)
+    print(f"Dataset loaded successfully. Total episodes: {dataset.num_episodes}")
+
     # Determine which episodes to analyze
     if args.episode_id is not None:
         # Single episode analysis
@@ -275,48 +267,31 @@ def main():
         print(f"Will analyze all {dataset.num_episodes} episodes")
     
     # Load policy
-    try:
-        print("Loading policy...")
-        policy, policy_cfg = load_policy(
-            args.policy_path,
-            dataset.meta,
-            args.policy_overrides
-        )
-        
-        if hasattr(policy, 'model'):
-            policy.model.eval()
-            policy.model.to(device)
-        elif hasattr(policy, 'eval'):
-            policy.eval()
-            
-        print("Policy loaded successfully")
-        
-    except Exception as e:
-        print(f"Error loading policy: {e}")
-        return
+    print("Loading policy...")
+    policy, _ = load_policy(
+        args.policy_path,
+        dataset.meta,
+        args.policy_overrides
+    )
     
-    # Run analysis on all specified episodes
-    failed_episodes = []
+    if hasattr(policy, 'model'):
+        policy.model.eval()
+        policy.model.to(device)
+    elif hasattr(policy, 'eval'):
+        policy.eval()
+        
+    print("Policy loaded successfully")
     
     for episode_id in tqdm(episodes_to_analyze, desc="Analyzing episodes"):
-        try:
-            print(f"\nStarting analysis of episode {episode_id}...")
-            analyze_episode(
-                dataset=dataset,
-                policy=policy,
-                episode_id=episode_id,
-                device=device,
-                output_dir=args.output_dir,
-                model_dtype=model_dtype
-            )
-            print(f"Episode {episode_id} analysis completed successfully")
+        print(f"\nStarting analysis of episode {episode_id}...")
+        analyze_episode(
+            dataset=dataset,
+            policy=policy,
+            episode_id=episode_id,
+            device=device,
+            model_dtype=model_dtype
+        )
+        print(f"Episode {episode_id} analysis completed successfully")
             
-        except Exception as e:
-            print(f"Error analyzing episode {episode_id}: {e}")
-            failed_episodes.append(episode_id)
-            import traceback
-            traceback.print_exc()
-            continue
-
 if __name__ == "__main__":
     main()

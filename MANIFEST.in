@@ -1,0 +1,14 @@
+# Include the license and readme
+include LICENSE
+include README.md
+
+# Include any additional documentation
+recursive-include docs *
+
+# Exclude unnecessary files
+exclude .gitignore
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude outputs *
+recursive-exclude videos *
+recursive-exclude scripts *

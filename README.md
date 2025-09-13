@@ -1,6 +1,44 @@
-# rewACT
+# RewACT: Reward-Augmented Action Chunking with Transformers
 
-A simple Reward Model for AI Robotics research trained via supervised learning. Compatible with LeRobot.
+A PyTorch implementation of RewACT, extending the ACT (Action Chunking with Transformers) model with reward-based learning for improved robotic control. Compatible with the newest version of LeRobot.
+
+## Installation
+
+`pip install rewact`
+
+You can also install the package in editable mode by cloning the repository and using `pip install -e .`.
+
+## Quick Start
+
+### Train a RewACT policy
+
+You can train a RewACT policy for any standard LeRobot dataset using the `scripts/train.py` script. This script basically copies the standard LeRobot training script so it should work directly with any command or `launch.json` config you use in LeRobot.
+
+```
+python scripts/train.py \
+--dataset.repo_id=danaaubakirova/so100_task_2 \
+--dataset.episodes=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19] \
+--policy.type=rewact \
+--policy.repo_id=villekuosmanen/so100_test \
+--output_dir=outputs/train/so100_test_2 \
+--job_name=so100_test \
+--batch_size=32 \
+--eval_freq=-1 \
+--log_freq=50 \
+--save_freq=1000 \
+--steps=10000
+```
+
+### Evaluating the trained RewACT policy
+
+To avoid overfitting, I highly recommend evaluating the trained policy using a validation or test dataset in the same training distribution.
+
+```
+python scripts/visualise.py \
+--dataset-repo-id "danaaubakirova/so100_task_2" \
+--episode-id 24 \
+--policy-path "outputs/train/so100_test/checkpoints/last/pretrained_model"
+```
 
 ## What is a reward model?
 
@@ -29,14 +67,9 @@ The linear interpolation method is not the most accurate - we can improve the me
 
 ## How do I use it?
 
-To use rewACT, replace the following files inside `lerobot` with the versions shown here (valid since 5th of August). Alternatively, [merge this pull request to your fork](https://github.com/huggingface/lerobot/pull/1696) or apply the changes manually to your fork. The main changes are:
-
-1. A method for inferring a dense reward based on episode progress.
-2. A reward prediction head bolt-on to the ACT transformer model.
-
 You can use rewACT with any pre-existing LeRobot dataset. Just train an ACT model using the default training script - the reward prediction is integrated into the loss function and will be optimised as part of the training process. You can follow this in Wandb as usual.
 
-You can test the reward prediction on an existing dataset using `visualise.py` - the reward value will be rendered in the output video. You should use unseen data for this test - either a different dataset for the same task, or episodes not used for training if you only have 1 dataset (you can restruct these using the `dataset.episodes` param, for example `--dataset.episodes=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]`).
+You can test the reward prediction on an existing dataset using `scripts/visualise.py` - the reward value will be rendered in the output video. You should use unseen data for this test - either a different dataset for the same task, or episodes not used for training if you only have 1 dataset (you can restruct these using the `dataset.episodes` param, for example `--dataset.episodes=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]`).
 
 You can use the rewACT model like any ACT model, you only need to add a second return value to the model call (i.e. replace `action = policy.select_action(...) with action, reward = policy.select_action(...)`). **You can use the predicted reward value for many purposes, such as detecting when the task is complete.**
 
