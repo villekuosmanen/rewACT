@@ -1,6 +1,86 @@
-# rewACT
+# RewACT: Reward-Augmented Action Chunking with Transformers
 
-A simple Reward Model for AI Robotics research trained via supervised learning. Compatible with LeRobot.
+A PyTorch implementation of RewACT, extending the ACT (Action Chunking with Transformers) model with reward-based learning for improved robotic control. Compatible with LeRobot.
+
+## Installation
+
+### Install from source
+
+```bash
+# Clone the repository
+git clone https://github.com/your-username/rewACT.git
+cd rewACT
+
+# Install in development mode (recommended for development)
+pip install -e .
+
+# Or install with development tools
+pip install -e ".[dev]"
+
+# Or install with training script dependencies
+pip install -e ".[scripts]"
+
+# Or install everything
+pip install -e ".[all]"
+
+# Production mode
+pip install .
+```
+
+### Using the installation helper
+
+```bash
+# Development installation
+python install.py dev
+
+# Production installation  
+python install.py prod
+
+# Test installation
+python install.py test
+```
+
+## Quick Start
+
+### Using the Dataset Wrapper
+
+```python
+import rewact
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+# Create a base dataset
+base_dataset = LeRobotDataset("your_dataset_id")
+
+# Wrap it with reward calculation
+dataset_with_reward = rewact.LeRobotDatasetWithReward(
+    dataset=base_dataset,
+    reward_start_pct=0.05,  # Start giving rewards at 5% episode progress
+    reward_end_pct=0.95     # Max reward at 95% episode progress
+)
+
+# Use the dataset - now includes calculated rewards
+item = dataset_with_reward[0]
+print(f"Reward: {item['reward']}")
+```
+
+### Creating a RewACT Policy
+
+```python
+import rewact
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from rewact.policy import RewACTConfig
+
+# Load dataset and config
+dataset = LeRobotDataset("your_dataset_id")
+config = RewACTConfig()
+
+# Create policy using the utility function
+policy = rewact.make_rewact_policy(config, dataset.meta)
+
+# Use for inference
+with torch.no_grad():
+    actions = policy(observation_batch)
+```
 
 ## What is a reward model?
 

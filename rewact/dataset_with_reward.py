@@ -1,9 +1,4 @@
-from pathlib import Path
-from typing import Callable
-
 import torch
-
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 
 class LeRobotDatasetWithReward:

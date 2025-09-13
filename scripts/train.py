@@ -26,10 +26,9 @@ from torch.optim import Optimizer
 
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.configs.types import FeatureType
 from lerobot.datasets.factory import make_dataset
 from lerobot.datasets.sampler import EpisodeAwareSampler
-from lerobot.datasets.utils import cycle, dataset_to_policy_features
+from lerobot.datasets.utils import cycle
 from lerobot.envs.factory import make_env
 from lerobot.optim.factory import make_optimizer_and_scheduler
 from lerobot.policies.pretrained import PreTrainedPolicy
@@ -54,6 +53,7 @@ from lerobot.utils.wandb_utils import WandBLogger
 
 from rewact import LeRobotDatasetWithReward
 from rewact.policy import RewACTPolicy
+from rewact.utils import make_rewact_policy
 
 def update_policy(
     train_metrics: MetricsTracker,
@@ -140,26 +140,8 @@ def train(cfg: TrainPipelineConfig):
 
     logging.info("Creating policy")
     
-    # make policy
-    policy_cfg = cfg.policy
-    kwargs = {}
-    features = dataset_to_policy_features(dataset.meta.features)
-    kwargs["dataset_stats"] = dataset.meta.stats
-
-    policy_cfg.output_features = {key: ft for key, ft in features.items() if ft.type is FeatureType.ACTION}
-    policy_cfg.input_features = {key: ft for key, ft in features.items() if key not in policy_cfg.output_features}
-    kwargs["config"] = policy_cfg
-
-    if policy_cfg.pretrained_path:
-        # Load a pretrained policy and override the config if needed (for example, if there are inference-time
-        # hyperparameters that we want to vary).
-        kwargs["pretrained_name_or_path"] = policy_cfg.pretrained_path
-        policy = RewACTPolicy.from_pretrained(**kwargs)
-    else:
-        # Make a fresh policy.
-        policy = RewACTPolicy(**kwargs)
-
-    policy.to(policy_cfg.device)
+    # Create RewACT policy using the utility function
+    policy = make_rewact_policy(cfg.policy, dataset.meta)
 
 
     logging.info("Creating optimizer and scheduler")

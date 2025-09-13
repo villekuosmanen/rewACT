@@ -14,12 +14,13 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.common.policies.factory import make_policy
 from lerobot.configs.policies import PreTrainedConfig
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 from reward_wrapper import ACTPolicyWithReward, create_reward_visualization_video
-
+from rewact.policy import RewACTConfig
+from rewact.policy import RewACTPolicy
+from rewact.utils import make_rewact_policy
 
 def none_or_int(value):
     if value == "None":
@@ -41,8 +42,8 @@ def load_policy(policy_path: str, dataset_meta, policy_overrides: list = None) -
         policy_cfg = PreTrainedConfig.from_pretrained(policy_path)
         policy_cfg.pretrained_path = policy_path
 
-    # NOTE: policy has to be an ACT policy for this to work
-    policy = make_policy(policy_cfg, ds_meta=dataset_meta)
+    # Create RewACT policy using the utility function
+    policy = make_rewact_policy(policy_cfg, dataset_meta)
     policy = ACTPolicyWithReward(policy)
         
     return policy, policy_cfg
@@ -113,12 +114,13 @@ def prepare_observation_for_policy(frame: dict,
     
     return observation
 
-def analyze_episode(dataset: LeRobotDataset,
-                   policy,
-                   episode_id: int,
-                   device: torch.device,
-                   output_dir: str,
-                   model_dtype: torch.dtype = torch.float32) -> Dict:
+def analyze_episode(
+    dataset: LeRobotDataset,
+    policy,
+    episode_id: int,
+    device: torch.device,
+    model_dtype: torch.dtype = torch.float32
+) -> Dict:
     """
     Run policy inference on an episode and analyze proprioceptive importance.
     
@@ -200,12 +202,9 @@ def analyze_episode(dataset: LeRobotDataset,
                 action = policy(observation)
                 
         timestamp_counter +=1
-    
-    # Generate output files
-    os.makedirs(output_dir, exist_ok=True)
-    
+        
     if reward_data and reward_images:
-        output_filename_reward = f"reward_visualization.mp4"
+        output_filename_reward = f"outputs/reward_visualization.mp4"
         create_reward_visualization_video(reward_images, reward_data, output_filename_reward, fps=20)
         
         # Print reward statistics
@@ -218,6 +217,8 @@ def analyze_episode(dataset: LeRobotDataset,
         print(f"  Final: {rewards[-1]:.3f}")
 
     print("Video encoding process finished.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Analyze policy behavior on dataset episodes")
     parser.add_argument("--dataset-repo-id", type=str, required=True,
@@ -226,8 +227,6 @@ def main():
                         help="Episode ID to analyze (if not specified, analyzes all episodes)")
     parser.add_argument("--policy-path", type=str, required=True,
                         help="Path to the policy checkpoint")
-    parser.add_argument("--output-dir", type=str, default="./analysis_output",
-                        help="Directory to save analysis results")
     parser.add_argument("--policy-overrides", type=str, nargs="*",
                         help="Policy config overrides in key=value format")
     parser.add_argument("--device", type=str, default="cuda",
@@ -290,7 +289,6 @@ def main():
             policy=policy,
             episode_id=episode_id,
             device=device,
-            output_dir=args.output_dir,
             model_dtype=model_dtype
         )
         print(f"Episode {episode_id} analysis completed successfully")
