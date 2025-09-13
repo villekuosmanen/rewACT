@@ -15,7 +15,18 @@ You can also install the package in editable mode by cloning the repository and 
 You can train a RewACT policy for any standard LeRobot dataset using the `scripts/train.py` script. This script basically copies the standard LeRobot training script so it should work directly with any command or `launch.json` config you use in LeRobot.
 
 ```
-# TODO
+python scripts/train.py \
+--dataset.repo_id=danaaubakirova/so100_task_2 \
+--dataset.episodes=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19] \
+--policy.type=rewact \
+--policy.repo_id=villekuosmanen/so100_test \
+--output_dir=outputs/train/so100_test_2 \
+--job_name=so100_test \
+--batch_size=32 \
+--eval_freq=-1 \
+--log_freq=50 \
+--save_freq=1000 \
+--steps=10000
 ```
 
 ### Evaluating the trained RewACT policy
@@ -23,7 +34,10 @@ You can train a RewACT policy for any standard LeRobot dataset using the `script
 To avoid overfitting, I highly recommend evaluating the trained policy using a validation or test dataset in the same training distribution.
 
 ```
-# TODO
+python scripts/visualise.py \
+--dataset-repo-id "danaaubakirova/so100_task_2" \
+--episode-id 24 \
+--policy-path "outputs/train/so100_test/checkpoints/last/pretrained_model"
 ```
 
 ## What is a reward model?
