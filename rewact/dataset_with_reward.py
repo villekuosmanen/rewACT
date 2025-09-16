@@ -379,7 +379,7 @@ class LeRobotDatasetWithReward:
         
         return sorted(keypoints, key=lambda kp: kp.frame_index)
 
-    def _find_sharp_transitions(self, sorted_keypoints: List[Tuple[int, float]], threshold: float = 0.5) -> List[int]:
+    def _find_sharp_transitions(self, sorted_keypoints: List[Tuple[int, float]], threshold: float = 0.99) -> List[int]:
         """
         Find indices where sharp transitions occur (reward drops by more than threshold).
         

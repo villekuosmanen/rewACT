@@ -113,7 +113,7 @@ def analyze_episode_rewards(
         reward_images, 
         reward_data, 
         output_filename, 
-        fps=20
+        fps=reward_dataset._dataset.fps
     )
     
     # Calculate statistics
