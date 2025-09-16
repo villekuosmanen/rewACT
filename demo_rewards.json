@@ -1,0 +1,29 @@
+{
+  "repo_id": "zaringleb/pick_single_cube_so101",
+  "episodes": {
+    "0": {
+      "keypoints": [
+        {
+          "timestamp": 0.3,
+          "reward": 0.0
+        },
+        {
+          "timestamp": 2.7,
+          "reward": 0.25
+        },
+        {
+          "timestamp": 6,
+          "reward": 0.5
+        },
+        {
+          "timestamp": 8.9,
+          "reward": 0.75
+        },
+        {
+          "timestamp": 10.6,
+          "reward": 1.0
+        }
+      ]
+    }
+  }
+}

@@ -52,7 +52,6 @@ from lerobot.utils.utils import (
 from lerobot.utils.wandb_utils import WandBLogger
 
 from rewact import LeRobotDatasetWithReward
-from rewact.policy import RewACTPolicy
 from rewact.utils import make_rewact_policy
 
 def update_policy(

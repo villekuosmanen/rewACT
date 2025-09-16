@@ -7,7 +7,6 @@ By default, analyzes all episodes in the dataset.
 """
 
 import argparse
-import os
 from typing import Dict, Tuple
 
 import numpy as np
@@ -18,8 +17,6 @@ from lerobot.configs.policies import PreTrainedConfig
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 from reward_wrapper import ACTPolicyWithReward, create_reward_visualization_video
-from rewact.policy import RewACTConfig
-from rewact.policy import RewACTPolicy
 from rewact.utils import make_rewact_policy
 
 def none_or_int(value):
@@ -178,34 +175,29 @@ def analyze_episode(
                 
         # Run policy inference
         with torch.inference_mode():
-            if hasattr(policy, 'select_action'):
-                action, reward = policy.select_action(observation)
+            _, reward = policy.select_action(observation)
 
-                reward_data.append({
-                    'step': timestamp_counter,
-                    'reward': reward
-                })
-                
-                # Extract images for reward visualization
-                reward_images_step = []
-                for key in observation:
-                    if "image" in key:
-                        # Convert back to original format for reward visualization
-                        img = observation[key].squeeze(0)  # Remove batch dim
-                        img = img * 255  # Convert back to 0-255 range
-                        img = img.permute(1, 2, 0)  # Convert from CHW to HWC
-                        reward_images_step.append(img.cpu())
-                reward_images.append(reward_images_step)                    
-                    
-            else:
-                # Fallback for other policy types
-                action = policy(observation)
+            reward_data.append({
+                'step': timestamp_counter,
+                'reward': reward
+            })
+            
+            # Extract images for reward visualization
+            reward_images_step = []
+            for key in observation:
+                if "image" in key:
+                    # Convert back to original format for reward visualization
+                    img = observation[key].squeeze(0)  # Remove batch dim
+                    img = img * 255  # Convert back to 0-255 range
+                    img = img.permute(1, 2, 0)  # Convert from CHW to HWC
+                    reward_images_step.append(img.cpu())
+            reward_images.append(reward_images_step)                    
                 
         timestamp_counter +=1
         
     if reward_data and reward_images:
         output_filename_reward = f"outputs/reward_visualization.mp4"
-        create_reward_visualization_video(reward_images, reward_data, output_filename_reward, fps=20)
+        create_reward_visualization_video(reward_images, reward_data, output_filename_reward, fps=dataset.fps)
         
         # Print reward statistics
         rewards = [r['reward'] for r in reward_data]
