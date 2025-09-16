@@ -7,7 +7,6 @@ By default, analyzes all episodes in the dataset.
 """
 
 import argparse
-import os
 from typing import Dict, Tuple
 
 import numpy as np
@@ -18,8 +17,6 @@ from lerobot.configs.policies import PreTrainedConfig
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 from reward_wrapper import ACTPolicyWithReward, create_reward_visualization_video
-from rewact.policy import RewACTConfig
-from rewact.policy import RewACTPolicy
 from rewact.utils import make_rewact_policy
 
 def none_or_int(value):

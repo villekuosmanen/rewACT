@@ -7,7 +7,6 @@ Loads reward specifications and applies them to episodes in a LeRobotDataset.
 
 import argparse
 import json
-import os
 from pathlib import Path
 from typing import Dict, List
 

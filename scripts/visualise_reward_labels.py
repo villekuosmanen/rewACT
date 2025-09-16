@@ -8,17 +8,15 @@ showing the interpolated rewards between keypoints.
 
 import argparse
 import os
-from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import numpy as np
 import torch
 from tqdm import tqdm
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
-from rewact.dataset_with_reward import LeRobotDatasetWithReward
 
-# Import visualization functions from reward_wrapper
+from rewact.dataset_with_reward import LeRobotDatasetWithReward
 from reward_wrapper import create_reward_visualization_video
 
 
