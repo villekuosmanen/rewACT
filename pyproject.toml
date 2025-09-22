@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rewact"
-version = "0.1.3"
+version = "0.1.4"
 description = "RewACT: Reward-Augmented Action Chunking with Transformers"
 readme = "README.md"
 license = {file = "LICENSE"}
