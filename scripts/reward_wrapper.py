@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import cv2
-from typing import List, Dict, Tuple, Optional, Union
+from typing import List, Dict, Tuple, Optional
 import tempfile
 from pathlib import Path
 import subprocess
