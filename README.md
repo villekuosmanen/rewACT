@@ -34,7 +34,7 @@ python scripts/train.py \
 To avoid overfitting, I highly recommend evaluating the trained policy using a validation or test dataset in the same training distribution.
 
 ```
-python scripts/visualise.py \
+python scripts/visualise_reward_predictions.py \
 --dataset-repo-id "danaaubakirova/so100_task_2" \
 --episode-id 24 \
 --policy-path "outputs/train/so100_test/checkpoints/last/pretrained_model"
@@ -69,7 +69,7 @@ The linear interpolation method is not the most accurate - we can improve the me
 
 You can use rewACT with any pre-existing LeRobot dataset. Just train an ACT model using the default training script - the reward prediction is integrated into the loss function and will be optimised as part of the training process. You can follow this in Wandb as usual.
 
-You can test the reward prediction on an existing dataset using `scripts/visualise.py` - the reward value will be rendered in the output video. You should use unseen data for this test - either a different dataset for the same task, or episodes not used for training if you only have 1 dataset (you can restruct these using the `dataset.episodes` param, for example `--dataset.episodes=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]`).
+You can test the reward prediction on an existing dataset using `scripts/visualise_reward_predictions.py` - the reward value will be rendered in the output video. You should use unseen data for this test - either a different dataset for the same task, or episodes not used for training if you only have 1 dataset (you can restruct these using the `dataset.episodes` param, for example `--dataset.episodes=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]`).
 
 You can use the rewACT model like any ACT model, you only need to add a second return value to the model call (i.e. replace `action = policy.select_action(...) with action, reward = policy.select_action(...)`). **You can use the predicted reward value for many purposes, such as detecting when the task is complete.**
 
