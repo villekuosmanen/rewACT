@@ -56,7 +56,7 @@ class LeRobotDatasetWithReward:
        using a simple linear interpolation between reward_start_pct and reward_end_pct based on episode progress.
     
     Key features:
-    - Automatic saving/loading of keypoint rewards to/from JSON files in the dataset's meta directory
+    - Automatic saving/loading of keypoint rewards to/from JSON files in the dataset's rewact_extensions directory
     - Smooth interpolation between keypoints with support for sharp transitions
     - Caching of interpolated rewards for performance
     - Validation of reward values (must be between 0.0 and 1.0)
@@ -247,9 +247,9 @@ class LeRobotDatasetWithReward:
         """Get the path to the reward keypoints JSON file."""
         # Get the dataset root path
         dataset_root = Path(self._dataset.root)
-        meta_dir = dataset_root / "meta"
-        meta_dir.mkdir(exist_ok=True)
-        return meta_dir / "reward_keypoints.json"
+        rewact_extensions_dir = dataset_root / "rewact_extensions"
+        rewact_extensions_dir.mkdir(exist_ok=True)
+        return rewact_extensions_dir / "reward_keypoints.json"
 
     def _load_keypoint_rewards(self) -> Dict[int, Dict[int, float]]:
         """
