@@ -175,9 +175,20 @@ class RewACTPolicy(PreTrainedPolicy):
         batch = self.normalize_targets(batch)
         actions_hat, reward_hat, (mu_hat, log_sigma_x2_hat) = self.model(batch)
 
-        l1_loss = (
-            F.l1_loss(batch[ACTION], actions_hat, reduction="none") * ~batch["action_is_pad"].unsqueeze(-1)
-        ).mean()
+        # Action loss - only compute for samples where use_action_mask is True
+        if "use_action_mask" in batch:
+            # batch["use_action_mask"] should be shape (batch_size,) boolean tensor
+            action_mask = batch["use_action_mask"].unsqueeze(-1).unsqueeze(-1)  # (batch_size, 1, 1)
+            # Combine with existing padding mask
+            combined_mask = (~batch["action_is_pad"].unsqueeze(-1)) & action_mask
+            l1_loss = (
+                F.l1_loss(batch[ACTION], actions_hat, reduction="none") * combined_mask
+            ).mean()
+        else:
+            # Original behavior - use all non-padded actions
+            l1_loss = (
+                F.l1_loss(batch[ACTION], actions_hat, reduction="none") * ~batch["action_is_pad"].unsqueeze(-1)
+            ).mean()
 
         if self.config.use_reward_head and reward_hat is not None:
             # Reward prediction loss - use MSE for continuous values
