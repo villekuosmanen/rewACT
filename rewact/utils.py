@@ -153,7 +153,7 @@ class WandBLogger:
             return
 
         step_id = checkpoint_dir.name
-        artifact_name = f"{self._group}-{step_id}"
+        artifact_name = f"{self._group}_{step_id}"
         artifact_name = get_safe_wandb_artifact_name(artifact_name)
         artifact = self._wandb.Artifact(artifact_name, type="model")
         artifact.add_file(checkpoint_dir / PRETRAINED_MODEL_DIR / SAFETENSORS_SINGLE_FILE)
