@@ -26,7 +26,6 @@ from torch.optim import Optimizer
 
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.datasets.factory import make_dataset
 from lerobot.datasets.sampler import EpisodeAwareSampler
 from lerobot.datasets.utils import cycle
 from lerobot.envs.factory import make_env
@@ -50,8 +49,10 @@ from lerobot.utils.utils import (
     init_logging,
 )
 from lerobot.utils.wandb_utils import WandBLogger
+from robocandywrapper.plugins import EpisodeOutcomePlugin
+from robocandywrapper import make_dataset
 
-from rewact import LeRobotDatasetWithReward
+from rewact.plugins import PiStar0_6CumulativeRewardPlugin
 from rewact.utils import make_rewact_policy
 
 def update_policy(
@@ -126,8 +127,7 @@ def train(cfg: TrainPipelineConfig):
     torch.backends.cuda.matmul.allow_tf32 = True
 
     logging.info("Creating dataset")
-    dataset = make_dataset(cfg)
-    dataset = LeRobotDatasetWithReward(dataset=dataset)
+    dataset = make_dataset(cfg, plugins=[EpisodeOutcomePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True)])
 
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,

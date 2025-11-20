@@ -23,4 +23,4 @@ from lerobot.policies.act.configuration_act import ACTConfig
 class RewACTConfig(ACTConfig):
     # Reward prediction head
     use_reward_head: bool = True
-    reward_loss_weight: float = 2.0
+    reward_loss_weight: float = 10
