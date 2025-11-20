@@ -285,6 +285,12 @@ def train(cfg: TrainPipelineConfig):
     logging.info("End of training")
 
     if cfg.policy.push_to_hub:
+        # Format datasets properly for YAML frontmatter
+        if cfg.dataset.repo_id.startswith('[') and cfg.dataset.repo_id.endswith(']'):
+            # Handle multiple datasets: "[dataset1, dataset2]" -> ["dataset1", "dataset2"]
+            datasets_str = cfg.dataset.repo_id.strip('[]')
+            datasets = [ds.strip() for ds in datasets_str.split(',')]
+            cfg.dataset.repo_id = datasets
         policy.push_model_to_hub(cfg)
 
 

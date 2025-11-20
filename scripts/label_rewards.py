@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import Dict, List
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
-from rewact.dataset_with_reward import LeRobotDatasetWithReward, KeypointReward
+from robocandywrapper import WrappedRobotDataset
+
+from rewact import RewardPlugin, RewardPluginInstance, KeypointReward, get_plugin_instance
 
 
 def load_reward_config(config_path: str) -> Dict:
@@ -76,7 +78,8 @@ def parse_episode_keypoints(episode_config: Dict) -> List[KeypointReward]:
 
 
 def label_episode_rewards(
-    reward_dataset: LeRobotDatasetWithReward,
+    reward_dataset: WrappedRobotDataset,
+    reward_plugin: RewardPluginInstance,
     episode_id: int,
     keypoints: List[KeypointReward],
     verbose: bool = True
@@ -85,7 +88,8 @@ def label_episode_rewards(
     Label rewards for a specific episode.
     
     Args:
-        reward_dataset: LeRobotDatasetWithReward instance
+        reward_dataset: WrappedRobotDataset instance
+        reward_plugin: RewardPluginInstance to add rewards to
         episode_id: Episode ID to label
         keypoints: List of KeypointReward objects
         verbose: Whether to print detailed information
@@ -93,11 +97,12 @@ def label_episode_rewards(
     if verbose:
         print(f"\nLabeling episode {episode_id}:")
         
-        # Get episode info
-        episode_length = reward_dataset._dataset.meta.episodes[episode_id]["length"]
-        episode_duration = episode_length / reward_dataset._dataset.fps
+        # Get episode info from the base dataset
+        base_dataset = reward_dataset._datasets[0]
+        episode_length = base_dataset.meta.episodes[episode_id]["length"]
+        episode_duration = episode_length / base_dataset.fps
         
-        print(f"  Episode length: {episode_length} frames ({episode_duration:.1f} seconds at {reward_dataset._dataset.fps} FPS)")
+        print(f"  Episode length: {episode_length} frames ({episode_duration:.1f} seconds at {base_dataset.fps} FPS)")
         print(f"  Adding {len(keypoints)} keypoints:")
         
         for i, kp in enumerate(keypoints, 1):
@@ -106,24 +111,25 @@ def label_episode_rewards(
             else:
                 print(f"    {i}. frame {kp.frame_index} -> reward {kp.reward:.1f}")
     
-    # Add keypoints to episode
-    reward_dataset.add_episode_rewards(episode_id, keypoints)
+    # Add keypoints to episode using the plugin instance
+    reward_plugin.add_episode_rewards(episode_id, keypoints)
     
     if verbose:
         # Show interpolated result at a few sample points
         print(f"  Keypoints added successfully!")
         
         # Sample a few frames to show interpolated rewards
+        base_dataset = reward_dataset._datasets[0]
         sample_frames = [0, episode_length // 4, episode_length // 2, 3 * episode_length // 4, episode_length - 1]
         print(f"  Sample interpolated rewards:")
         
-        ep_start = reward_dataset._dataset.episode_data_index["from"][episode_id].item()
+        ep_start = base_dataset.episode_data_index["from"][episode_id].item()
         for frame_idx in sample_frames:
             global_idx = ep_start + frame_idx
             if global_idx < len(reward_dataset):
                 item = reward_dataset[global_idx]
                 reward_value = item["reward"].item()
-                timestamp = frame_idx / reward_dataset._dataset.fps
+                timestamp = frame_idx / base_dataset.fps
                 print(f"    Frame {frame_idx} ({timestamp:.1f}s): {reward_value:.3f}")
 
 
@@ -202,8 +208,15 @@ def main():
         print(f"Error loading dataset: {e}")
         return 1
     
-    # Wrap with reward functionality
-    reward_dataset = LeRobotDatasetWithReward(base_dataset)
+    # Wrap with reward plugin
+    reward_plugin_obj = RewardPlugin(reward_start_pct=0.05, reward_end_pct=0.95)
+    reward_dataset = WrappedRobotDataset(base_dataset, plugins=[reward_plugin_obj])
+    
+    # Get the reward plugin instance for the dataset
+    reward_plugin_instance = get_plugin_instance(reward_dataset, RewardPlugin, dataset_idx=0)
+    if reward_plugin_instance is None:
+        print("Error: Could not get reward plugin instance")
+        return 1
     
     # Clear existing rewards if requested
     if args.clear_existing:
@@ -211,7 +224,7 @@ def main():
         for episode_id_str in episodes_to_process:
             episode_id = int(episode_id_str)
             if episode_id < base_dataset.num_episodes:
-                reward_dataset.remove_episode_rewards(episode_id)
+                reward_plugin_instance.remove_episode_rewards(episode_id)
         print("Existing rewards cleared")
     
     # Process each episode
@@ -234,7 +247,7 @@ def main():
             print(f"Warning: No keypoints found for episode {episode_id}")
             continue
         
-        label_episode_rewards(reward_dataset, episode_id, keypoints, args.verbose)
+        label_episode_rewards(reward_dataset, reward_plugin_instance, episode_id, keypoints, args.verbose)
         success_count += 1
                 
     # Summary
@@ -245,7 +258,7 @@ def main():
     print(f"Errors: {error_count}")
     
     if success_count > 0:
-        reward_file_path = reward_dataset._get_reward_file_path()
+        reward_file_path = reward_plugin_instance._get_reward_file_path()
         print(f"Reward labels saved to: {reward_file_path}")
         
         # Show some statistics
@@ -253,7 +266,7 @@ def main():
         for episode_id_str in episodes_to_process:
             episode_id = int(episode_id_str)
             if episode_id < base_dataset.num_episodes:
-                keypoints = reward_dataset.get_episode_keypoints(episode_id)
+                keypoints = reward_plugin_instance.get_episode_keypoints(episode_id)
                 total_keypoints += len(keypoints)
         
         print(f"Total keypoints added: {total_keypoints}")

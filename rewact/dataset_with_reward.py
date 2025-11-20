@@ -1,11 +1,11 @@
-import torch
+from dataclasses import dataclass
 import json
-import numpy as np
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Tuple
-from dataclasses import dataclass
 
+import numpy as np
 from scipy.interpolate import CubicSpline, interp1d
+import torch
 
 
 @dataclass
@@ -94,6 +94,8 @@ class LeRobotDatasetWithReward:
         dataset,
         reward_start_pct: float = 0.05,
         reward_end_pct: float = 0.95,
+        mask_actions_for_eval_data: bool = False,
+        mask_actions_for_fail_data: bool = False,
     ):
         """
         Initialize the dataset wrapper with reward calculation parameters.
@@ -102,6 +104,8 @@ class LeRobotDatasetWithReward:
             dataset: The underlying LeRobotDataset
             reward_start_pct: Progress percentage where reward starts (0.0) - used for fallback
             reward_end_pct: Progress percentage where reward reaches maximum (1.0) - used for fallback
+            mask_actions_for_eval_data: If True, mask actions from datasets with 'eval_' prefix
+            mask_actions_for_fail_data: If True, mask actions from datasets with 'fail_' prefix
         """
         # Create the underlying dataset
         self._dataset = dataset
@@ -116,6 +120,10 @@ class LeRobotDatasetWithReward:
         self.reward_start_pct = reward_start_pct
         self.reward_end_pct = reward_end_pct
         
+        # Store action masking parameters
+        self.mask_actions_for_eval_data = mask_actions_for_eval_data
+        self.mask_actions_for_fail_data = mask_actions_for_fail_data
+        
         # Load keypoint rewards if they exist
         self.keypoint_rewards = self._load_keypoint_rewards()
         self._episode_reward_cache = {}
@@ -127,6 +135,17 @@ class LeRobotDatasetWithReward:
         
         # Add reward calculation
         item["reward"] = self._calculate_reward(idx, item)
+        
+        # Add action masking
+        repo_name = self._dataset.repo_id.split('/')[1] if '/' in self._dataset.repo_id else self._dataset.repo_id
+        use_action_mask = True
+        
+        if self.mask_actions_for_eval_data and repo_name.startswith('eval_'):
+            use_action_mask = False
+        elif self.mask_actions_for_fail_data and repo_name.startswith('fail_'):
+            use_action_mask = False
+        
+        item["use_action_mask"] = torch.tensor(use_action_mask, dtype=torch.bool)
         
         return item
     

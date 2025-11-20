@@ -58,7 +58,8 @@ def analyze_episode_rewards(
     Analyze reward labels for an episode and create visualization.
     
     Args:
-        reward_dataset: LeRobotDatasetWithReward instance
+        reward_dataset: WrappedRobotDataset instance
+        reward_plugin: RewardPluginInstance to get keypoints from
         episode_id: Episode ID to analyze
         output_dir: Directory to save output videos
         
@@ -235,7 +236,7 @@ def add_example_keypoints(
     # Only add keypoints that are within the episode length
     valid_keypoints = {k: v for k, v in example_keypoints.items() if k < episode_length}
     
-    reward_dataset.add_episode_rewards(episode_id, valid_keypoints)
+    reward_plugin.add_episode_rewards(episode_id, valid_keypoints)
     
     print(f"Added {len(valid_keypoints)} keypoints:")
     for frame_idx, reward in sorted(valid_keypoints.items()):
@@ -306,18 +307,19 @@ def main():
         
         # Add example keypoints if requested
         if args.add_example_keypoints:
-            add_example_keypoints(reward_dataset, episode_id)
+            add_example_keypoints(reward_dataset, reward_plugin_instance, episode_id)
         
         # Analyze the episode
         stats = analyze_episode_rewards(
             reward_dataset, 
+            reward_plugin_instance,
             episode_id, 
             args.output_dir
         )
         all_stats.append(stats)
         
         # Show detailed keypoint analysis
-        visualize_keypoint_progression(reward_dataset, episode_id, args.output_dir)
+        visualize_keypoint_progression(reward_dataset, reward_plugin_instance, episode_id, args.output_dir)
     
     # Summary
     print(f"\n{'='*80}")
