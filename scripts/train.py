@@ -48,9 +48,11 @@ from lerobot.utils.utils import (
     has_method,
     init_logging,
 )
-from robocandywrapper import WrappedRobotDataset, make_dataset
+from lerobot.utils.wandb_utils import WandBLogger
+from robocandywrapper.plugins import EpisodeOutcomePlugin
+from robocandywrapper import make_dataset
 
-from rewact import RewardPlugin, WandBLogger
+from rewact.plugins import PiStar0_6CumulativeRewardPlugin
 from rewact.utils import make_rewact_policy
 
 def update_policy(
@@ -125,14 +127,8 @@ def train(cfg: TrainPipelineConfig):
     torch.backends.cuda.matmul.allow_tf32 = True
 
     logging.info("Creating dataset")
-    reward_plugin = RewardPlugin(
-        reward_start_pct=0.05,
-        reward_end_pct=0.95,
-        mask_actions_for_eval_data=True,
-        mask_actions_for_fail_data=True,
-    )
-    dataset = make_dataset(cfg, plugins=[reward_plugin])
-    
+    dataset = make_dataset(cfg, plugins=[EpisodeOutcomePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True)])
+
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,
     # using the eval.py instead, with gym_dora environment and dora-rs.

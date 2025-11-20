@@ -23,7 +23,4 @@ from lerobot.policies.act.configuration_act import ACTConfig
 class RewACTConfig(ACTConfig):
     # Reward prediction head
     use_reward_head: bool = True
-    reward_loss_weight: float = 2.0
-    num_value_bins: int = 100  # Number of bins for distributional value function
-    value_min: int = 0
-    value_max: int = 1
+    reward_loss_weight: float = 10
