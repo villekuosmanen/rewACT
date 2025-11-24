@@ -18,12 +18,9 @@ from lerobot.configs.policies import PreTrainedConfig
 from lerobot.policies.act.configuration_act import ACTConfig
 
 
-@PreTrainedConfig.register_subclass("rewact")
+@PreTrainedConfig.register_subclass("actvantage")
 @dataclass
-class RewACTConfig(ACTConfig):
-    # Reward prediction head
-    use_reward_head: bool = True # Deprecated - unused
-    reward_loss_weight: float = 0.1
-    num_value_bins: int = 100  # Number of bins for distributional value function
+class ACTvantageConfig(ACTConfig):
+    advantage_dropout_prob: float = 0.3
     value_min: int = 0
     value_max: int = 1

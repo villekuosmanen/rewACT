@@ -16,6 +16,7 @@
 import logging
 import time
 from contextlib import nullcontext
+from pathlib import Path
 from pprint import pformat
 from typing import Any
 
@@ -48,12 +49,12 @@ from lerobot.utils.utils import (
     has_method,
     init_logging,
 )
-from robocandywrapper import WandBLogger
+from lerobot.utils.wandb_utils import WandBLogger
 from robocandywrapper.plugins import EpisodeOutcomePlugin
 from robocandywrapper import make_dataset
 
 from rewact.plugins import PiStar0_6CumulativeRewardPlugin
-from rewact.utils import make_rewact_policy
+from rewact.utils import make_actvantage_policy
 
 def update_policy(
     train_metrics: MetricsTracker,
@@ -127,7 +128,23 @@ def train(cfg: TrainPipelineConfig):
     torch.backends.cuda.matmul.allow_tf32 = True
 
     logging.info("Creating dataset")
-    dataset = make_dataset(cfg, plugins=[EpisodeOutcomePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True)])
+    from rewact.plugins import PiStar0_6AdvantagePlugin
+
+    advantage_file = Path("outputs/pack_toothbrush_Nov19_advantage.parquet")
+    if not advantage_file.exists():
+        logging.warning(
+            f"Advantage file not found: {advantage_file}. "
+            "Please run precompute_advantage.py first"
+        )
+        raise FileNotFoundError(f"Advantage file not found: {advantage_file}")
+    else:
+        advantage_plugin = PiStar0_6AdvantagePlugin(
+            advantage_file=advantage_file,
+            use_percentile_threshold=True,
+            percentile=30.0,  # Can be configured
+        )
+
+    dataset = make_dataset(cfg, plugins=[EpisodeOutcomePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True), advantage_plugin])
 
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,
@@ -140,8 +157,7 @@ def train(cfg: TrainPipelineConfig):
     logging.info("Creating policy")
     
     # Create RewACT policy using the utility function
-    policy = make_rewact_policy(cfg.policy, dataset.meta)
-
+    policy = make_actvantage_policy(cfg.policy, dataset.meta)
 
     logging.info("Creating optimizer and scheduler")
     optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)

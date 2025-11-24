@@ -34,20 +34,20 @@ from lerobot.policies.act.modeling_act import (
     create_sinusoidal_pos_embedding,
 )
 
-from rewact.policy import RewACTConfig
+from rewact.actvantage_policy import ACTvantageConfig
 
 
-class RewACTPolicy(PreTrainedPolicy):
+class ACTvantagePolicy(PreTrainedPolicy):
     """
-    Reward prediction wrapper for ACT.
+    Advantage-conditioned policy wrapper for ACT in the style of pi*0.6.
     """
 
-    config_class = RewACTConfig
-    name = "rewact"
+    config_class = ACTvantageConfig
+    name = "actvantage"
 
     def __init__(
         self,
-        config: RewACTConfig,
+        config: ACTvantageConfig,
         dataset_stats: dict[str, dict[str, Tensor]] | None = None,
     ):
         """
@@ -69,13 +69,7 @@ class RewACTPolicy(PreTrainedPolicy):
             config.output_features, config.normalization_mapping, dataset_stats
         )
 
-        self.model = RewACT(config)
-
-        # Pre-compute bin edges for discretizing continuous values during training
-        self.register_buffer(
-            "bin_edges",
-            torch.linspace(config.value_min, config.value_max, config.num_value_bins + 1)
-        )
+        self.model = ACTvantage(config)
 
         if config.temporal_ensemble_coeff is not None:
             self.temporal_ensembler = ACTTemporalEnsembler(config.temporal_ensemble_coeff, config.chunk_size)
@@ -135,53 +129,37 @@ class RewACTPolicy(PreTrainedPolicy):
             self._action_queue = deque([], maxlen=self.config.n_action_steps)
 
     @torch.no_grad()
-    def select_action(self, batch: dict[str, Tensor], force_model_run: bool = False) -> tuple[Tensor, Tensor]:
+    def select_action(self, batch: dict[str, Tensor]) -> tuple[Tensor, Tensor]:
         """Select a single action given environment observations."""
         self.eval()
 
         if self.config.temporal_ensemble_coeff is not None:
-            actions, reward_output = self.predict_action_chunk(batch)
+            actions = self.predict_action_chunk(batch)
             action = self.temporal_ensembler.update(actions)
-            if reward_output is not None:
-                # Use expected value for inference
-                reward_pred = reward_output['expected_value'][0, 0]
-                reward_pred = torch.clamp(reward_pred, 0.0, 1.0)
-                return action, reward_pred
-            else:
-                return action, None
+            return action
 
         # Action queue logic for n_action_steps > 1
         if len(self._action_queue) == 0:
-            actions, reward_output = self.predict_action_chunk(batch)
+            actions = self.predict_action_chunk(batch)
             actions = actions[:, : self.config.n_action_steps]
-
-            if reward_output is not None:
-                # Use expected value for inference
-                current_reward_pred = reward_output['expected_value'][0, 0]
-                current_reward_pred = torch.clamp(current_reward_pred, 0.0, 1.0)
-
             self._action_queue.extend(actions.transpose(0, 1))
-        elif force_model_run:
-            _, reward_output = self.predict_action_chunk(batch)
-            if reward_output is not None:
-                current_reward_pred = reward_output['expected_value'][0, 0]
-                current_reward_pred = torch.clamp(current_reward_pred, 0.0, 1.0)
 
-        return self._action_queue.popleft(), current_reward_pred
+        return self._action_queue.popleft()
 
     @torch.no_grad()
-    def predict_action_chunk(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
+    def predict_action_chunk(self, batch: dict[str, Tensor]) -> Tensor:
         """Predict a chunk of actions given environment observations."""
         self.eval()
 
         batch = self.normalize_inputs(batch)
+        batch["advantage"] = torch.ones((1, 1), device=self.model.device)
         if self.config.image_features:
             batch = dict(batch)
             batch[OBS_IMAGES] = [batch[key] for key in self.config.image_features]
 
-        actions, reward_output, _ = self.model(batch)
+        actions, _ = self.model(batch)
         actions = self.unnormalize_outputs({ACTION: actions})[ACTION]
-        return actions, reward_output
+        return actions
 
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
         """Run the batch through the model and compute the loss for training or validation."""
@@ -191,7 +169,7 @@ class RewACTPolicy(PreTrainedPolicy):
             batch[OBS_IMAGES] = [batch[key] for key in self.config.image_features]
 
         batch = self.normalize_targets(batch)
-        actions_hat, reward_output, (mu_hat, log_sigma_x2_hat) = self.model(batch)
+        actions_hat, (mu_hat, log_sigma_x2_hat) = self.model(batch)
 
         # Action loss - only compute for samples where use_action_mask is True
         if "use_action_mask" in batch:
@@ -205,56 +183,23 @@ class RewACTPolicy(PreTrainedPolicy):
                 F.l1_loss(batch[ACTION], actions_hat, reduction="none") * ~batch["action_is_pad"].unsqueeze(-1)
             ).mean()
 
-        if reward_output is not None:
-            # Distributional value prediction loss - use cross-entropy
-            if "reward" in batch:
-                reward_targets = batch["reward"]  # (B, 1) - continuous values in [0, 1]
-                
-                # Convert continuous targets to bin indices
-                target_bins = self._value_to_bin(reward_targets)  # (B,) - discrete bin indices
-                
-                # Compute cross-entropy loss
-                reward_logits = reward_output['logits']  # (B, num_bins)
-                reward_loss = F.cross_entropy(
-                    reward_logits,      # (B, num_bins)
-                    target_bins,        # (B,)
-                    reduction='mean'
-                )
-            else:
-                reward_loss = torch.tensor(0.0, device=actions_hat.device)
-        else:
-            reward_loss = torch.tensor(0.0, device=actions_hat.device)
-
         loss_dict = {
             "l1_loss": l1_loss.item(),
-            "reward_loss": reward_loss.item() * self.config.reward_loss_weight,
         }
-        
-        # Optionally log additional distributional metrics
-        if reward_output is not None and "reward" in batch:
-            # Log expected value MSE for comparison with old approach
-            expected_values = reward_output['expected_value'].squeeze()
-            mse_for_logging = F.mse_loss(expected_values, reward_targets.squeeze())
-            loss_dict["reward_mse"] = mse_for_logging.item()
-            
-            # Log entropy (measure of uncertainty)
-            reward_dist = reward_output['distribution']
-            entropy = -(reward_dist * torch.log(reward_dist + 1e-8)).sum(dim=-1).mean()
-            loss_dict["reward_entropy"] = entropy.item()
-        
+                
         if self.config.use_vae:
             mean_kld = (
                 (-0.5 * (1 + log_sigma_x2_hat - mu_hat.pow(2) - (log_sigma_x2_hat).exp())).sum(-1).mean()
             )
             loss_dict["kld_loss"] = mean_kld.item()
-            loss = l1_loss + self.config.reward_loss_weight * reward_loss + mean_kld * self.config.kl_weight
+            loss = l1_loss + mean_kld * self.config.kl_weight
         else:
-            loss = l1_loss + self.config.reward_loss_weight * reward_loss
+            loss = l1_loss
 
         return loss, loss_dict
 
 
-class RewACT(nn.Module):
+class ACTvantage(nn.Module):
     """Action Chunking Transformer: The underlying neural network for ACTPolicy.
 
     Note: In this code we use the terms `vae_encoder`, 'encoder', `decoder`. The meanings are as follows.
@@ -289,7 +234,7 @@ class RewACT(nn.Module):
                                 └───────────────────────┘
     """
 
-    def __init__(self, config: RewACTConfig):
+    def __init__(self, config: ACTvantageConfig):
         # BERT style VAE encoder with input tokens [cls, robot_state, *action_sequence].
         # The cls token forms parameters of the latent's distribution (like this [*means, *log_variances]).
         super().__init__()
@@ -347,6 +292,8 @@ class RewACT(nn.Module):
                 self.config.env_state_feature.shape[0], config.dim_model
             )
         self.encoder_latent_input_proj = nn.Linear(config.latent_dim, config.dim_model)
+        self.encoder_advantage_input_proj = nn.Linear(1, config.dim_model)
+        self.advantage_dropout_prob = config.advantage_dropout_prob
         if self.config.image_features:
             self.encoder_img_feat_input_proj = nn.Conv2d(
                 backbone_model.fc.in_features, config.dim_model, kernel_size=1
@@ -357,6 +304,7 @@ class RewACT(nn.Module):
             n_1d_tokens += 1
         if self.config.env_state_feature:
             n_1d_tokens += 1
+        n_1d_tokens += 1  # for advantage
         self.encoder_1d_feature_pos_embed = nn.Embedding(n_1d_tokens, config.dim_model)
         if self.config.image_features:
             self.encoder_cam_feat_pos_embed = ACTSinusoidalPositionEmbedding2d(config.dim_model // 2)
@@ -367,22 +315,6 @@ class RewACT(nn.Module):
 
         # Final action regression head on the output of the transformer's decoder.
         self.action_head = nn.Linear(config.dim_model, self.config.action_feature.shape[0])
-
-        # Distributional value prediction head: predicts distribution over bins
-        self.reward_head = nn.Sequential(
-            nn.Linear(config.dim_model, config.dim_model // 2),
-            nn.ReLU(),
-            nn.Linear(config.dim_model // 2, config.dim_model // 4),
-            nn.ReLU(),
-            nn.Linear(config.dim_model // 4, config.num_value_bins),  # Output: distribution over bins
-        )
-        
-        # Pre-compute bin values for converting distribution to continuous value
-        # Shape: (num_value_bins,)
-        self.register_buffer(
-            "bin_values",
-            torch.linspace(config.value_min, config.value_max, config.num_value_bins)
-        )
 
         self._reset_parameters()
 
@@ -478,6 +410,21 @@ class RewACT(nn.Module):
         # Prepare transformer encoder inputs.
         encoder_in_tokens = [self.encoder_latent_input_proj(latent_sample)]
         encoder_in_pos_embed = list(self.encoder_1d_feature_pos_embed.weight.unsqueeze(1))
+
+        # Advantage token.
+        if "advantage" in batch:
+            # batch["advantage"] should be (B, 1) continuous advantage values
+            advantage_input = batch["advantage"]  # (B, 1)
+            dropout_mask = torch.rand(advantage_input.shape[0], device=advantage_input.device) > self.advantage_dropout_prob
+            dropout_mask = dropout_mask.unsqueeze(1).float()
+            advantage_input = advantage_input * dropout_mask
+        else:
+            # If advantage not provided (e.g., during early training or eval), 
+            # use zeros (neutral advantage)
+            advantage_input = torch.zeros((batch_size, 1), device=latent_sample.device)
+        
+        encoder_in_tokens.append(self.encoder_advantage_input_proj(advantage_input))
+
         # Robot state token.
         if self.config.robot_state_feature:
             encoder_in_tokens.append(self.encoder_robot_state_input_proj(batch["observation.state"]))
@@ -529,20 +476,4 @@ class RewACT(nn.Module):
 
         actions = self.action_head(decoder_out)
 
-        # Predict distribution over value bins for the current timestep
-        reward_logits = self.reward_head(decoder_out[:, 0, :])  # (B, num_bins)
-        reward_dist = F.softmax(reward_logits, dim=-1)  # (B, num_bins)
-        
-        # Convert distribution to expected value (for inference/logging)
-        # reward_preds: (B, 1)
-        reward_preds = (reward_dist * self.bin_values).sum(dim=-1, keepdim=True)
-        
-        # Return both the distribution (logits) and expected value
-        # We'll use logits for loss computation, expected value for inference
-        reward_output = {
-            'logits': reward_logits,      # (B, num_bins) - for training
-            'distribution': reward_dist,   # (B, num_bins) - for analysis
-            'expected_value': reward_preds # (B, 1) - for inference
-        }
-
-        return actions, reward_output, (mu, log_sigma_x2)
+        return actions, (mu, log_sigma_x2)

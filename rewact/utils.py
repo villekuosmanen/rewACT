@@ -18,6 +18,7 @@ from lerobot.datasets.utils import dataset_to_policy_features
 from termcolor import colored
 
 from rewact.policy import RewACTPolicy
+from rewact.actvantage_policy import ACTvantagePolicy
 
 def cfg_to_group(cfg: TrainPipelineConfig, return_list: bool = False) -> list[str] | str:
     """Return a group name for logging. Optionally returns group name as list."""
@@ -79,6 +80,45 @@ def make_rewact_policy(
     else:
         # Make a fresh policy
         policy = RewACTPolicy(**kwargs)
+    
+    # Move to device
+    target_device = device if device is not None else getattr(cfg, 'device', 'cpu')
+    policy.to(target_device)
+    
+    return policy
+
+
+def make_actvantage_policy(
+    cfg: PreTrainedConfig,
+    ds_meta: Optional[LeRobotDatasetMetadata] = None,
+    device: Optional[str] = None,
+) -> ACTvantagePolicy:
+    """
+    Create an ACTvantage policy from configuration and dataset metadata.
+    """
+    if ds_meta is None:
+        raise ValueError("Dataset metadata (ds_meta) is required for policy creation")
+    
+    # Create policy kwargs
+    kwargs = {}
+    
+    # Convert dataset features to policy features
+    features = dataset_to_policy_features(ds_meta.features)
+    kwargs["dataset_stats"] = ds_meta.stats
+    
+    # Set input and output features
+    cfg.output_features = {key: ft for key, ft in features.items() if ft.type is FeatureType.ACTION}
+    cfg.input_features = {key: ft for key, ft in features.items() if key not in cfg.output_features}
+    kwargs["config"] = cfg
+    
+    # Create policy instance
+    if getattr(cfg, 'pretrained_path', None):
+        # Load a pretrained policy and override the config if needed
+        kwargs["pretrained_name_or_path"] = cfg.pretrained_path
+        policy = ACTvantagePolicy.from_pretrained(**kwargs)
+    else:
+        # Make a fresh policy
+        policy = ACTvantagePolicy(**kwargs)
     
     # Move to device
     target_device = device if device is not None else getattr(cfg, 'device', 'cpu')

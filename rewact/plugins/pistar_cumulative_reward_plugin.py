@@ -179,6 +179,30 @@ class PiStar0_6CumulativeRewardPluginInstance(PluginInstance):
         normalized = np.clip(normalized, 0.0, 1.0)
         
         return float(normalized)
+    
+    def denormalize_reward(self, normalized: float) -> float:
+        """
+        Denormalize reward from [0, 1] range back to raw cumulative reward value.
+        
+        This is the inverse of _normalize_reward.
+        
+        Args:
+            normalized: Normalized reward in [0, 1]
+            
+        Returns:
+            Raw cumulative reward value
+        """
+        if self._norm_min == self._norm_max:
+            # Edge case: if all episodes have length 1
+            # In forward direction: cumulative_reward >= 0 -> 1.0, else -> 0.0
+            # For reverse, we can return a reasonable default
+            return 0.0 if normalized >= 0.5 else self._norm_min
+        
+        # Linear denormalization: inverse of (cumulative_reward - norm_min) / (norm_max - norm_min)
+        # Solving for cumulative_reward: normalized * (norm_max - norm_min) + norm_min
+        cumulative_reward = normalized * (self._norm_max - self._norm_min) + self._norm_min
+        
+        return float(cumulative_reward)
 
 
 class PiStar0_6CumulativeRewardPlugin(DatasetPlugin):
