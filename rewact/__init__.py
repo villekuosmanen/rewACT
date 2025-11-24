@@ -12,6 +12,7 @@ __author__ = "Ville Kuosmanen"
 from rewact.dataset_with_reward import LeRobotDatasetWithReward, KeypointReward
 from rewact.reward_plugin import RewardPlugin, RewardPluginInstance
 from rewact.policy import RewACTConfig, RewACTPolicy, RewACT
+from rewact.actvantage_policy import ACTvantageConfig, ACTvantagePolicy, ACTvantage
 from rewact.utils import WandBLogger, make_rewact_policy
 from rewact.plugin_utils import get_plugin_instance
 
@@ -26,4 +27,7 @@ __all__ = [
     "make_rewact_policy",
     "get_plugin_instance",
     "WandBLogger",
+    "ACTvantageConfig",
+    "ACTvantagePolicy",
+    "ACTvantage",
 ]
