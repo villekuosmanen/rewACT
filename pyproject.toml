@@ -22,7 +22,7 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "lerobot",
+    "lerobot==0.3.3",
     "einops>=0.6.0",
     "scipy>=1.7.0",
 ]
