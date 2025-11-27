@@ -49,11 +49,12 @@ from lerobot.utils.utils import (
     has_method,
     init_logging,
 )
-from lerobot.utils.wandb_utils import WandBLogger
+from robocandywrapper import WandBLogger
 from robocandywrapper.plugins import EpisodeOutcomePlugin
+from robocandywrapper.samplers import load_sampler_config
 from robocandywrapper import make_dataset
 
-from rewact.plugins import PiStar0_6CumulativeRewardPlugin
+from rewact.plugins import PiStar0_6CumulativeRewardPlugin, ControlModePlugin
 from rewact.utils import make_actvantage_policy
 
 def update_policy(
@@ -122,6 +123,9 @@ def train(cfg: TrainPipelineConfig):
     if cfg.seed is not None:
         set_seed(cfg.seed)
 
+    sampler_config = load_sampler_config("scripts/configs/sampler_actvantage.json")
+    cfg.dataset.episodes = sampler_config.episodes
+
     # Check device is available
     device = get_safe_torch_device(cfg.policy.device, log=True)
     torch.backends.cudnn.benchmark = True
@@ -129,22 +133,31 @@ def train(cfg: TrainPipelineConfig):
 
     logging.info("Creating dataset")
     from rewact.plugins import PiStar0_6AdvantagePlugin
-
-    advantage_file = Path("outputs/pack_toothbrush_Nov19_advantage.parquet")
-    if not advantage_file.exists():
+    
+    # For multiple dataset training, provide a mapping of repo_id to advantage directory:
+    advantage_dirs = {
+        "villekuosmanen/pack_toothbrush_Nov19": Path("outputs/pack_toothbrush_Nov19_advantage"),
+        "villekuosmanen/pack_toothbrush_Nov26": Path("outputs/pack_toothbrush_Nov26_advantage"),
+        "villekuosmanen/dAgger_pack_toothbrush_Nov22": Path("outputs/dAgger_pack_toothbrush_Nov22_advantage"),
+        "villekuosmanen/dAgger_pack_toothbrush_Nov26": Path("outputs/dAgger_pack_toothbrush_Nov26_advantage"),
+    }
+    
+    # Validate all directories exist
+    missing_dirs = [repo_id for repo_id, path in advantage_dirs.items() if not path.exists()]
+    if missing_dirs:
         logging.warning(
-            f"Advantage file not found: {advantage_file}. "
-            "Please run precompute_advantage.py first"
+            f"Advantage directories not found for datasets: {missing_dirs}. "
+            "Please run precompute_advantage.py first for each dataset"
         )
-        raise FileNotFoundError(f"Advantage file not found: {advantage_file}")
-    else:
-        advantage_plugin = PiStar0_6AdvantagePlugin(
-            advantage_file=advantage_file,
-            use_percentile_threshold=True,
-            percentile=30.0,  # Can be configured
-        )
+        raise FileNotFoundError(f"Missing advantage directories for: {missing_dirs}")
+    
+    advantage_plugin = PiStar0_6AdvantagePlugin(
+        advantage_file=advantage_dirs,  # Now accepts dict for multiple datasets
+        use_percentile_threshold=True,
+        percentile=30.0,  # Can be configured
+    )
 
-    dataset = make_dataset(cfg, plugins=[EpisodeOutcomePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True), advantage_plugin])
+    dataset = make_dataset(cfg, plugins=[EpisodeOutcomePlugin(), ControlModePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True), advantage_plugin])
 
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,
@@ -305,7 +318,7 @@ def train(cfg: TrainPipelineConfig):
         if cfg.dataset.repo_id.startswith('[') and cfg.dataset.repo_id.endswith(']'):
             # Handle multiple datasets: "[dataset1, dataset2]" -> ["dataset1", "dataset2"]
             datasets_str = cfg.dataset.repo_id.strip('[]')
-            datasets = [ds.strip() for ds in datasets_str.split(',')]
+            datasets = [ds.strip('\'\" ') for ds in datasets_str.split(',')]
             cfg.dataset.repo_id = datasets
         policy.push_model_to_hub(cfg)
 

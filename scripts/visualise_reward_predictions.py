@@ -18,6 +18,7 @@ from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 from reward_wrapper import ACTPolicyWithReward, create_reward_visualization_video
 from rewact.utils import make_rewact_policy
+from robocandywrapper.dataformats.lerobot_21 import LeRobot21Dataset
 
 def none_or_int(value):
     if value == "None":
@@ -243,7 +244,7 @@ def main():
     print(f"Using device: {device}")
     
     # Load dataset
-    dataset = LeRobotDataset(args.dataset_repo_id)
+    dataset = LeRobot21Dataset(args.dataset_repo_id)
     print(f"Dataset loaded successfully. Total episodes: {dataset.num_episodes}")
 
     # Determine which episodes to analyze

@@ -10,6 +10,7 @@ import torch
 import pandas as pd
 from pathlib import Path
 from robocandywrapper import DatasetPlugin, PluginInstance
+from .control_mode_plugin import CONTROL_MODE_HUMAN
 
 
 class PiStar0_6AdvantagePluginInstance(PluginInstance):
@@ -32,17 +33,21 @@ class PiStar0_6AdvantagePluginInstance(PluginInstance):
         
         # Threshold for binarizing advantage
         if use_percentile_threshold:
-            # Use percentile of the data
+            # Use percentile of this dataset's data (single dataset mode)
             self.advantage_threshold = self.advantage_data.quantile(percentile / 100.0)
+            threshold_source = f"{percentile}th percentile (per-dataset)"
         elif advantage_threshold is not None:
+            # Use provided threshold (multi-dataset mode with global threshold)
             self.advantage_threshold = advantage_threshold
+            threshold_source = "global (across all datasets)"
         else:
             # Default: use 0 (neutral)
             self.advantage_threshold = 0.0
+            threshold_source = "default (0.0)"
                 
-        print(f"Advantage plugin initialized:")
-        print(f"  Threshold: {self.advantage_threshold:.4f}")
-        print(f"  Positive advantages: {(self.advantage_data > self.advantage_threshold).mean()*100:.1f}%")
+        print(f"  Dataset: {dataset.repo_id}")
+        print(f"    Threshold: {self.advantage_threshold:.4f} ({threshold_source})")
+        print(f"    Positive advantages in this dataset: {(self.advantage_data > self.advantage_threshold).mean()*100:.1f}%")
     
     def get_data_keys(self) -> list[str]:
         """Return the keys this plugin will add to items."""
@@ -56,6 +61,16 @@ class PiStar0_6AdvantagePluginInstance(PluginInstance):
     ) -> dict[str, Any]:
         """Get advantage data for a specific item."""
         
+        # Check if control mode indicates human control
+        # Human-controlled frames always get positive advantage (1)
+        if accumulated_data is not None and "control_mode" in accumulated_data:
+            control_mode = accumulated_data["control_mode"]
+            if control_mode == CONTROL_MODE_HUMAN:
+                return {
+                    "advantage": torch.tensor([1], dtype=torch.float32)
+                }
+        
+        # For policy and unknown modes, use pre-computed advantage values
         # Get pre-computed advantage value
         if idx in self.advantage_data.index:
             advantage_value = self.advantage_data.loc[idx]
@@ -64,7 +79,7 @@ class PiStar0_6AdvantagePluginInstance(PluginInstance):
             advantage_value = 0.0
         
         return {
-            "advantage": torch.tensor([1 if advantage_value > self.advantage_threshold else -1], dtype=torch.float32)  # (1, 1)
+            "advantage": torch.tensor([1 if advantage_value > self.advantage_threshold else -1], dtype=torch.float32)
         }
 
 
@@ -75,32 +90,56 @@ class PiStar0_6AdvantagePlugin(DatasetPlugin):
     Advantages should be pre-computed using the value function and stored in a parquet file
     with columns: ['frame_index', 'advantage'].
     
-    Example:
+    Integration with ControlModePlugin:
+    If control mode data is available from ControlModePlugin, frames labeled as human-controlled
+    will always receive a positive advantage value (1), regardless of the pre-computed advantage.
+    This ensures that human demonstrations are always treated as high-quality examples.
+    
+    Example (single dataset):
 ```python
         from robocandywrapper import WrappedRobotDataset
-        from rewact.advantage_plugin import AdvantagePlugin
+        from rewact.plugins import PiStar0_6AdvantagePlugin, ControlModePlugin
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
         
-        # Create plugin
-        advantage_plugin = AdvantagePlugin(
-            advantage_file="advantages.parquet",
+        # Create plugins
+        control_mode_plugin = ControlModePlugin()  # Optional: provides human/policy labels
+        advantage_plugin = PiStar0_6AdvantagePlugin(
+            advantage_file="advantages_dir",  # Can be a directory or single parquet file
             use_percentile_threshold=True,
             percentile=30.0  # Top 70% are positive
         )
         
-        # Load dataset with plugin
+        # Load dataset with plugins (ControlModePlugin first for advantage override)
         base_dataset = LeRobotDataset("my_dataset")
-        dataset = WrappedRobotDataset(base_dataset, plugins=[advantage_plugin])
+        dataset = WrappedRobotDataset(
+            base_dataset, 
+            plugins=[control_mode_plugin, advantage_plugin]
+        )
         
         # Access data with advantages
         item = dataset[0]
-        advantage = item["advantage"]  # Tensor (1, 1) with advantage value
+        advantage = item["advantage"]  # Tensor with value 1 or -1
+        # If control_mode is "human", advantage will be 1
+        # Otherwise, based on pre-computed advantages
+```
+    
+    Example (multiple datasets):
+```python
+        # For multiple datasets, provide a mapping of repo_id to advantage directory
+        advantage_plugin = PiStar0_6AdvantagePlugin(
+            advantage_file={
+                "lerobot/dataset1": "outputs/dataset1_advantages",
+                "lerobot/dataset2": "outputs/dataset2_advantages",
+            },
+            use_percentile_threshold=True,
+            percentile=30.0
+        )
 ```
     """
     
     def __init__(
         self,
-        advantage_file: str | Path,
+        advantage_file: str | Path | dict[str, str | Path],
         advantage_threshold: Optional[float] = None,
         use_percentile_threshold: bool = True,
         percentile: float = 30.0,
@@ -109,31 +148,107 @@ class PiStar0_6AdvantagePlugin(DatasetPlugin):
         Initialize the advantage plugin.
         
         Args:
-            advantage_file: Path to parquet file with columns ['frame_index', 'advantage']
+            advantage_file: Path to parquet file OR directory containing episode_*.parquet files
+                           OR dict mapping dataset repo_ids to their advantage directories
             advantage_threshold: Fixed threshold for binarizing advantages (if not using percentile)
             use_percentile_threshold: If True, use percentile of data as threshold
             percentile: Percentile to use as threshold (e.g., 30 means top 70% are positive)
         """
-        self.advantage_file = Path(advantage_file)
-        if not self.advantage_file.exists():
-            raise FileNotFoundError(f"Advantage file not found: {advantage_file}")
-        
-        # Load advantage data
-        self.advantage_data = pd.read_parquet(self.advantage_file)
-        
-        if 'frame_index' not in self.advantage_data.columns or 'advantage' not in self.advantage_data.columns:
-            raise ValueError("Advantage file must contain 'frame_index' and 'advantage' columns")
-        
-        self.advantage_threshold = advantage_threshold
+        # Store configuration
+        self.advantage_file = advantage_file
         self.use_percentile_threshold = use_percentile_threshold
         self.percentile = percentile
+        
+        # Load advantage data and compute global threshold
+        self.advantage_data = None  # For single dataset case
+        self.advantage_data_dict = {}  # For multi-dataset case
+        
+        if isinstance(advantage_file, dict):
+            # Multiple datasets: load all and compute global threshold
+            print(f"Loading advantages from {len(advantage_file)} datasets for global threshold computation...")
+            all_advantages = []
+            
+            for repo_id, adv_path in advantage_file.items():
+                data = self._load_advantage_data(adv_path)
+                self.advantage_data_dict[repo_id] = data
+                all_advantages.extend(data['advantage'].values)
+                print(f"  - {repo_id}: {len(data)} frames")
+            
+            # Compute global threshold across all datasets
+            all_advantages_series = pd.Series(all_advantages)
+            if use_percentile_threshold:
+                self.advantage_threshold = all_advantages_series.quantile(percentile / 100.0)
+            elif advantage_threshold is not None:
+                self.advantage_threshold = advantage_threshold
+            else:
+                self.advantage_threshold = 0.0
+            
+            print(f"\nGlobal advantage threshold: {self.advantage_threshold:.4f}")
+            print(f"Total frames across all datasets: {len(all_advantages)}")
+            print(f"Positive advantages (global): {(all_advantages_series > self.advantage_threshold).mean()*100:.1f}%")
+            
+        else:
+            # Single dataset: load data immediately (backward compatibility)
+            self.advantage_data = self._load_advantage_data(advantage_file)
+            
+            # Compute threshold for single dataset
+            if use_percentile_threshold:
+                self.advantage_threshold = self.advantage_data['advantage'].quantile(percentile / 100.0)
+            elif advantage_threshold is not None:
+                self.advantage_threshold = advantage_threshold
+            else:
+                self.advantage_threshold = 0.0
+    
+    def _load_advantage_data(self, advantage_path: str | Path) -> pd.DataFrame:
+        """Load advantage data from a file or directory."""
+        advantage_path = Path(advantage_path)
+        if not advantage_path.exists():
+            raise FileNotFoundError(f"Advantage path not found: {advantage_path}")
+        
+        # Load advantage data from file or directory
+        if advantage_path.is_dir():
+            # Load all episode files from directory
+            episode_files = sorted(advantage_path.glob("episode_*.parquet"))
+            if not episode_files:
+                raise FileNotFoundError(f"No episode_*.parquet files found in directory: {advantage_path}")
+            
+            print(f"Loading {len(episode_files)} episode advantage files from {advantage_path}")
+            dfs = []
+            for ep_file in episode_files:
+                dfs.append(pd.read_parquet(ep_file))
+            advantage_data = pd.concat(dfs, ignore_index=True)
+        else:
+            # Load single parquet file (backward compatibility)
+            advantage_data = pd.read_parquet(advantage_path)
+        
+        if 'frame_index' not in advantage_data.columns or 'advantage' not in advantage_data.columns:
+            raise ValueError("Advantage file must contain 'frame_index' and 'advantage' columns")
+        
+        return advantage_data
     
     def attach(self, dataset) -> PiStar0_6AdvantagePluginInstance:
         """Create a dataset-specific plugin instance."""
+        # Determine which advantage data to use
+        if isinstance(self.advantage_file, dict):
+            # Multiple datasets: use pre-loaded data and global threshold
+            repo_id = dataset.repo_id
+            if repo_id not in self.advantage_data_dict:
+                raise KeyError(
+                    f"No advantage data loaded for dataset '{repo_id}'. "
+                    f"Available datasets: {list(self.advantage_data_dict.keys())}"
+                )
+            
+            print(f"Attaching advantage plugin to dataset: {repo_id}")
+            advantage_data = self.advantage_data_dict[repo_id]
+        else:
+            # Single dataset: use pre-loaded data
+            advantage_data = self.advantage_data
+        
+        # Use the global threshold (already computed in __init__)
         return PiStar0_6AdvantagePluginInstance(
             dataset,
-            advantage_data=self.advantage_data,
+            advantage_data=advantage_data,
             advantage_threshold=self.advantage_threshold,
-            use_percentile_threshold=self.use_percentile_threshold,
+            use_percentile_threshold=False,  # Don't recalculate, use pre-computed threshold
             percentile=self.percentile,
         )

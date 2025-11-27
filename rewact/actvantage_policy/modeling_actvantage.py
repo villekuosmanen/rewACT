@@ -153,6 +153,7 @@ class ACTvantagePolicy(PreTrainedPolicy):
 
         batch = self.normalize_inputs(batch)
         batch["advantage"] = torch.ones((1, 1), device=self.model.device)
+        # batch["advantage"] = torch.neg(torch.ones((1, 1), device=self.model.device))
         if self.config.image_features:
             batch = dict(batch)
             batch[OBS_IMAGES] = [batch[key] for key in self.config.image_features]

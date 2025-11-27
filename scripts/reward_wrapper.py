@@ -308,6 +308,254 @@ def create_reward_frame(
     cv2.imwrite(str(output_path), canvas)
 
 
+def create_advantage_visualization_video(
+    images_list: List[List[torch.Tensor]], 
+    advantage_data: List[Dict], 
+    output_path: str = "advantage_visualization.mp4",
+    fps: int = 20,
+    advantage_threshold: float = 0.0,
+    image_size: Tuple[int, int] = (640, 480),
+    graph_height: int = 200
+) -> str:
+    """
+    Create a video showing images with advantage line graph below.
+    Green region above threshold, red region below threshold.
+    
+    Args:
+        images_list: List of image tensors for each step
+        advantage_data: List of advantage dictionaries with 'step' and 'advantage' keys
+        output_path: Path for output video
+        fps: Frames per second
+        advantage_threshold: Threshold value (middle of graph)
+        image_size: Size for resized images
+        graph_height: Height of the advantage graph section
+        
+    Returns:
+        Path to created video
+    """
+    if not images_list or not advantage_data:
+        print("No images or advantage data provided for video generation")
+        return None
+    
+    print(f"Creating advantage visualization video with {len(images_list)} frames...")
+    
+    # Create temporary directory for frames
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        
+        # Generate frames
+        for step_idx, (images, adv_info) in enumerate(zip(images_list, advantage_data)):
+            frame_path = temp_path / f"frame_{step_idx:06d}.png"
+            create_advantage_frame(
+                images, adv_info, advantage_data, frame_path, 
+                image_size, graph_height, advantage_threshold
+            )
+        
+        # Create video using ffmpeg
+        create_video_from_frames(temp_path, output_path, fps)
+    
+    print(f"Advantage visualization video saved to: {output_path}")
+    return output_path
+
+
+def create_advantage_frame(
+    images: List[torch.Tensor], 
+    current_adv_data: Dict,
+    all_adv_data: List[Dict],
+    output_path: Path,
+    image_size: Tuple[int, int],
+    graph_height: int,
+    threshold: float
+):
+    """Create a single advantage visualization frame with images and advantage graph"""
+    # Configuration
+    image_width, image_height = image_size
+    margin = 20
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.6
+    font_thickness = 1
+    
+    # Define graph bounds
+    lower_bound = threshold - 1.0
+    upper_bound = threshold + 1.0
+    
+    # Get valid images
+    valid_images = [img for img in images if img is not None]
+    num_images = len(valid_images)
+    
+    # Calculate canvas dimensions
+    if num_images == 0:
+        canvas_width = 800
+        images_height = image_height
+    else:
+        canvas_width = num_images * image_width + (num_images + 1) * margin
+        images_height = image_height
+    
+    total_height = images_height + graph_height + 3 * margin
+    
+    # Create canvas
+    canvas = np.zeros((total_height, canvas_width, 3), dtype=np.uint8)
+    canvas.fill(40)  # Dark gray background
+    
+    # Process and place images
+    y_img = margin
+    for i, img in enumerate(valid_images):
+        x_img = margin + i * (image_width + margin)
+        
+        # Convert tensor to opencv format
+        if img.dim() == 4:  # (B,C,H,W)
+            img = img.squeeze(0)
+        
+        # Handle different tensor formats
+        if img.dim() == 3:
+            if img.shape[0] == 3:  # (C,H,W)
+                img_np = img.permute(1, 2, 0).cpu().numpy()
+            elif img.shape[2] == 3:  # (H,W,C)
+                img_np = img.cpu().numpy()
+            else:
+                print(f"Warning: Unexpected image shape {img.shape}, skipping image {i}")
+                continue
+        else:
+            print(f"Warning: Unexpected image dimensions {img.dim()}, skipping image {i}")
+            continue
+        
+        # Ensure we have 3 channels
+        if img_np.shape[2] != 3:
+            print(f"Warning: Image has {img_np.shape[2]} channels, expected 3, skipping image {i}")
+            continue
+        
+        # Normalize to 0-255
+        if img_np.max() <= 1.0:
+            img_np = (img_np * 255).astype(np.uint8)
+        else:
+            img_np = img_np.astype(np.uint8)
+        
+        # Convert RGB to BGR for OpenCV
+        img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+        
+        # Resize image
+        img_resized = cv2.resize(img_np, (image_width, image_height))
+        
+        # Place image on canvas
+        if img_resized.shape == (image_height, image_width, 3):
+            canvas[y_img:y_img + image_height, x_img:x_img + image_width] = img_resized
+            
+            # Add camera label
+            label = f'Camera {i + 1}'
+            label_size = cv2.getTextSize(label, font, font_scale, font_thickness)[0]
+            label_x = x_img + (image_width - label_size[0]) // 2
+            label_y = y_img - 5
+            cv2.putText(canvas, label, (label_x, label_y), font, font_scale, (255, 255, 255), font_thickness)
+    
+    # Create advantage graph
+    graph_y = images_height + 2 * margin
+    graph_width = canvas_width - 2 * margin
+    graph_area_height = graph_height - 2 * margin
+    
+    # Graph background
+    cv2.rectangle(canvas, (margin, graph_y), (canvas_width - margin, graph_y + graph_height), (60, 60, 60), -1)
+    
+    # Draw colored background regions
+    # Threshold line is at the middle
+    threshold_y = graph_y + margin + graph_area_height // 2
+    
+    # Green region (above threshold)
+    green_alpha = 0.3
+    green_overlay = canvas.copy()
+    cv2.rectangle(green_overlay, 
+                  (margin, graph_y + margin), 
+                  (canvas_width - margin, threshold_y),
+                  (0, 150, 0), -1)
+    cv2.addWeighted(green_overlay, green_alpha, canvas, 1 - green_alpha, 0, canvas)
+    
+    # Red region (below threshold)
+    red_alpha = 0.3
+    red_overlay = canvas.copy()
+    cv2.rectangle(red_overlay,
+                  (margin, threshold_y),
+                  (canvas_width - margin, graph_y + graph_height - margin),
+                  (0, 0, 150), -1)
+    cv2.addWeighted(red_overlay, red_alpha, canvas, 1 - red_alpha, 0, canvas)
+    
+    # Draw threshold line
+    cv2.line(canvas, (margin, threshold_y), (canvas_width - margin, threshold_y), (255, 255, 0), 2)
+    cv2.putText(canvas, f'Threshold: {threshold:.3f}', 
+                (margin + 10, threshold_y - 5), font, 0.5, (255, 255, 0), 1)
+    
+    # Draw advantage line graph
+    current_step = current_adv_data['step']
+    current_advantage = current_adv_data['advantage']
+    
+    # Get all advantages up to current step
+    advantages_so_far = [a['advantage'] for a in all_adv_data[:current_step + 1]]
+    steps_so_far = [a['step'] for a in all_adv_data[:current_step + 1]]
+    
+    # Helper function to map advantage value to y coordinate
+    def advantage_to_y(adv_val):
+        # Clip to bounds
+        clipped = np.clip(adv_val, lower_bound, upper_bound)
+        # Normalize to [0, 1] range within bounds
+        normalized = (clipped - lower_bound) / (upper_bound - lower_bound)
+        # Invert (high advantage at top)
+        inverted = 1 - normalized
+        # Map to pixel coordinates
+        return graph_y + margin + int(inverted * graph_area_height)
+    
+    if len(advantages_so_far) > 1:
+        # Calculate graph coordinates
+        max_steps = max(50, len(all_adv_data))  # Show at least 50 steps worth of space
+        
+        # Draw graph lines and points
+        for i in range(1, len(advantages_so_far)):
+            # Calculate positions
+            x1 = margin + int((steps_so_far[i-1] / max_steps) * graph_width)
+            y1 = advantage_to_y(advantages_so_far[i-1])
+            x2 = margin + int((steps_so_far[i] / max_steps) * graph_width)
+            y2 = advantage_to_y(advantages_so_far[i])
+            
+            # Color based on whether advantage is positive (above threshold)
+            is_positive = advantages_so_far[i] > threshold
+            line_color = (0, 255, 0) if is_positive else (0, 0, 255)  # Green if positive, red if negative
+            
+            # Draw line segment
+            cv2.line(canvas, (x1, y1), (x2, y2), line_color, 2)
+            
+            # Draw point at current position
+            if i == len(advantages_so_far) - 1:
+                cv2.circle(canvas, (x2, y2), 5, (255, 255, 0), -1)  # Yellow circle for current position
+    
+    # Draw graph borders
+    cv2.rectangle(canvas, (margin, graph_y + margin), 
+                  (canvas_width - margin, graph_y + graph_height - margin), 
+                  (255, 255, 255), 1)
+    
+    # Y-axis labels (advantage values)
+    y_labels = [upper_bound, threshold, lower_bound]
+    for adv_val in y_labels:
+        y_pos = advantage_to_y(adv_val)
+        label = f'{adv_val:.2f}'
+        cv2.putText(canvas, label, (5, y_pos + 5), font, 0.4, (255, 255, 255), 1)
+        # Draw horizontal grid line
+        if adv_val != threshold:  # Don't double-draw threshold line
+            cv2.line(canvas, (margin, y_pos), (canvas_width - margin, y_pos), (100, 100, 100), 1)
+    
+    # Current advantage display
+    is_positive = current_advantage > threshold
+    adv_text = f'Advantage: {current_advantage:+.3f} ({"POSITIVE" if is_positive else "NEGATIVE"})'
+    text_color = (0, 255, 0) if is_positive else (0, 0, 255)
+    text_size = cv2.getTextSize(adv_text, font, font_scale * 1.2, font_thickness + 1)[0]
+    text_x = (canvas_width - text_size[0]) // 2
+    text_y = graph_y + graph_height - 10
+    cv2.putText(canvas, adv_text, (text_x, text_y), font, font_scale * 1.2, text_color, font_thickness + 1)
+    
+    # Step counter
+    step_text = f'Step {current_step}'
+    cv2.putText(canvas, step_text, (margin, graph_y - 5), font, font_scale, (255, 255, 255), font_thickness)
+    
+    # Save frame
+    cv2.imwrite(str(output_path), canvas)
+
+
 def create_video_from_frames(frames_dir: Path, output_path: str, fps: int):
     """Use ffmpeg to create video from frames"""
     cmd = [
