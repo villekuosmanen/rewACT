@@ -50,6 +50,7 @@ from lerobot.utils.utils import (
 )
 from robocandywrapper import WandBLogger
 from robocandywrapper.plugins import EpisodeOutcomePlugin
+from robocandywrapper.samplers import load_sampler_config
 from robocandywrapper import make_dataset
 
 from rewact.plugins import PiStar0_6CumulativeRewardPlugin
@@ -120,6 +121,9 @@ def train(cfg: TrainPipelineConfig):
 
     if cfg.seed is not None:
         set_seed(cfg.seed)
+
+    sampler_config = load_sampler_config("scripts/configs/sampler_rewact.json")
+    cfg.dataset.episodes = sampler_config.episodes
 
     # Check device is available
     device = get_safe_torch_device(cfg.policy.device, log=True)
@@ -289,7 +293,7 @@ def train(cfg: TrainPipelineConfig):
         if cfg.dataset.repo_id.startswith('[') and cfg.dataset.repo_id.endswith(']'):
             # Handle multiple datasets: "[dataset1, dataset2]" -> ["dataset1", "dataset2"]
             datasets_str = cfg.dataset.repo_id.strip('[]')
-            datasets = [ds.strip() for ds in datasets_str.split(',')]
+            datasets = [ds.strip('\'\" ') for ds in datasets_str.split(',')]
             cfg.dataset.repo_id = datasets
         policy.push_model_to_hub(cfg)
 
