@@ -41,16 +41,50 @@ class RewardPluginInstance(PluginInstance):
         # Load keypoint rewards if they exist
         self.keypoint_rewards = self._load_keypoint_rewards()
         self._episode_reward_cache = {}
+        
+        # Create mapping from episode_idx to position in episode_data_index
+        # This is needed when using a subset of episodes
+        if hasattr(dataset, 'episodes') and dataset.episodes is not None:
+            self._episode_idx_to_pos = {ep_idx: pos for pos, ep_idx in enumerate(dataset.episodes)}
+        else:
+            # No subsetting, episode_idx == position
+            self._episode_idx_to_pos = None
     
     def get_data_keys(self) -> list[str]:
         """Return the keys this plugin will add to items."""
         return ["reward", "use_action_mask"]
     
+    def _get_episode_data_index_pos(self, episode_idx: int) -> int:
+        """
+        Get the position in episode_data_index for a given episode_idx.
+        
+        When using a subset of episodes, episode_idx (the actual episode number)
+        needs to be mapped to its position in the filtered episode_data_index.
+        
+        Args:
+            episode_idx: The actual episode number from the dataset
+            
+        Returns:
+            Position to use for indexing into episode_data_index
+        """
+        if self._episode_idx_to_pos is not None:
+            if episode_idx not in self._episode_idx_to_pos:
+                raise ValueError(
+                    f"Episode {episode_idx} not found in the subset of episodes being used. "
+                    f"Available episodes: {list(self._episode_idx_to_pos.keys())}"
+                )
+            return self._episode_idx_to_pos[episode_idx]
+        else:
+            # No subsetting, episode_idx is the position
+            return episode_idx
+    
     def get_item_data(self, idx: int, episode_idx: int) -> dict[str, Any]:
         """Get reward data for a specific item."""
         # Get episode information
         episode_length = self.dataset.meta.episodes[episode_idx]["length"]
-        ep_start = self.dataset.episode_data_index["from"][episode_idx]
+        # Map episode_idx to position in episode_data_index (needed for episode subsets)
+        ep_pos = self._get_episode_data_index_pos(episode_idx)
+        ep_start = self.dataset.episode_data_index["from"][ep_pos]
         
         # Calculate frame index within episode
         # Note: idx is local to the dataset, not global
