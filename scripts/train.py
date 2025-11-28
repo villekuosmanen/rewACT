@@ -122,6 +122,9 @@ def train(cfg: TrainPipelineConfig):
     if cfg.seed is not None:
         set_seed(cfg.seed)
 
+    # Force pyav video decoding to avoid issues with torchcodec and GPU-accelerated video decoding in the cloud.
+    cfg.dataset.video_backend = "pyav"
+
     sampler_config = load_sampler_config("scripts/configs/sampler_rewact.json")
     cfg.dataset.episodes = sampler_config.episodes
 
@@ -167,6 +170,21 @@ def train(cfg: TrainPipelineConfig):
     logging.info(f"{dataset.num_episodes=}")
     logging.info(f"{num_learnable_params=} ({format_big_number(num_learnable_params)})")
     logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
+
+    # Benchmarking data loading performance
+    # Test single batch load speed
+    import time
+    test_dataset = dataset
+    print(f"Dataset length: {len(test_dataset)}")
+    start = time.perf_counter()
+    sample = test_dataset[0]
+    print(f"Single sample load: {time.perf_counter() - start:.3f}s")
+    start = time.perf_counter()
+    sample = test_dataset[0]
+    print(f"Same sample load twice: {time.perf_counter() - start:.3f}s")
+    start = time.perf_counter()
+    sample = test_dataset[1000]
+    print(f"Second sample load: {time.perf_counter() - start:.3f}s")
 
     # create dataloader for offline training
     if hasattr(cfg.policy, "drop_n_last_frames"):
