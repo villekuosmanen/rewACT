@@ -136,10 +136,11 @@ def train(cfg: TrainPipelineConfig):
     
     # For multiple dataset training, provide a mapping of repo_id to advantage directory:
     advantage_dirs = {
-        "villekuosmanen/pack_toothbrush_Nov19": Path("outputs/pack_toothbrush_Nov19_advantage"),
-        "villekuosmanen/pack_toothbrush_Nov26": Path("outputs/pack_toothbrush_Nov26_advantage"),
-        "villekuosmanen/dAgger_pack_toothbrush_Nov22": Path("outputs/dAgger_pack_toothbrush_Nov22_advantage"),
-        "villekuosmanen/dAgger_pack_toothbrush_Nov26": Path("outputs/dAgger_pack_toothbrush_Nov26_advantage"),
+        "villekuosmanen/pack_toothbrush_Nov19": Path("outputs/pack_toothbrush_Nov19-advantages"),
+        "villekuosmanen/pack_toothbrush_Nov26": Path("outputs/pack_toothbrush_Nov26-advantages"),
+        "villekuosmanen/dAgger_pack_toothbrush_Nov22": Path("outputs/dAgger_pack_toothbrush_Nov22-advantages"),
+        "villekuosmanen/dAgger_pack_toothbrush_Nov26": Path("outputs/dAgger_pack_toothbrush_Nov26-advantages"),
+        "villekuosmanen/dAgger_pack_toothbrush_Nov28": Path("outputs/dAgger_pack_toothbrush_Nov28-advantages"),
     }
     
     # Validate all directories exist
@@ -154,7 +155,7 @@ def train(cfg: TrainPipelineConfig):
     advantage_plugin = PiStar0_6AdvantagePlugin(
         advantage_file=advantage_dirs,  # Now accepts dict for multiple datasets
         use_percentile_threshold=True,
-        percentile=30.0,  # Can be configured
+        percentile=40.0,  # Can be configured
     )
 
     dataset = make_dataset(cfg, plugins=[EpisodeOutcomePlugin(), ControlModePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True), advantage_plugin])

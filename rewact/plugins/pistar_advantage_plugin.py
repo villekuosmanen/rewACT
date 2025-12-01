@@ -29,7 +29,18 @@ class PiStar0_6AdvantagePluginInstance(PluginInstance):
         super().__init__(dataset)
         
         # Store advantage data indexed by frame_index
-        self.advantage_data = advantage_data.set_index('frame_index')['advantage']
+        indexed_data = advantage_data.set_index('frame_index')
+        self.advantage_data = indexed_data['advantage']
+        
+        # Store required_intervention data if available
+        if 'required_intervention' in indexed_data.columns:
+            self.required_intervention_data = indexed_data['required_intervention']
+            has_interventions = self.required_intervention_data.any()
+            intervention_pct = self.required_intervention_data.mean() * 100
+        else:
+            self.required_intervention_data = None
+            has_interventions = False
+            intervention_pct = 0.0
         
         # Threshold for binarizing advantage
         if use_percentile_threshold:
@@ -48,6 +59,8 @@ class PiStar0_6AdvantagePluginInstance(PluginInstance):
         print(f"  Dataset: {dataset.repo_id}")
         print(f"    Threshold: {self.advantage_threshold:.4f} ({threshold_source})")
         print(f"    Positive advantages in this dataset: {(self.advantage_data > self.advantage_threshold).mean()*100:.1f}%")
+        if has_interventions:
+            print(f"    Required intervention frames: {intervention_pct:.1f}%")
     
     def get_data_keys(self) -> list[str]:
         """Return the keys this plugin will add to items."""
@@ -70,6 +83,15 @@ class PiStar0_6AdvantagePluginInstance(PluginInstance):
                     "advantage": torch.tensor([1], dtype=torch.float32)
                 }
         
+        # Check if this frame required intervention in the future
+        # If so, it gets negative advantage (-1) regardless of computed advantage
+        if self.required_intervention_data is not None and idx in self.required_intervention_data.index:
+            required_intervention = self.required_intervention_data.loc[idx]
+            if required_intervention:
+                return {
+                    "advantage": torch.tensor([-1], dtype=torch.float32)
+                }
+        
         # For policy and unknown modes, use pre-computed advantage values
         # Get pre-computed advantage value
         if idx in self.advantage_data.index:
@@ -88,12 +110,22 @@ class PiStar0_6AdvantagePlugin(DatasetPlugin):
     Plugin that provides pre-computed advantage values for advantage-conditioned training.
     
     Advantages should be pre-computed using the value function and stored in a parquet file
-    with columns: ['frame_index', 'advantage'].
+    with columns: ['frame_index', 'advantage', 'required_intervention' (optional)].
+    
+    Advantage Assignment Logic (in priority order):
+    1. Human-controlled frames (from ControlModePlugin): Always get advantage = 1
+    2. Frames requiring future intervention (required_intervention=True): Always get advantage = -1
+    3. Otherwise: Use threshold comparison on computed advantage value
     
     Integration with ControlModePlugin:
     If control mode data is available from ControlModePlugin, frames labeled as human-controlled
     will always receive a positive advantage value (1), regardless of the pre-computed advantage.
     This ensures that human demonstrations are always treated as high-quality examples.
+    
+    Required Intervention Detection:
+    The 'required_intervention' column tracks frames where the N-step-ahead future required human
+    intervention (current frame is policy-controlled but future frame is human-controlled).
+    These frames get negative advantage (-1) as they represent actions leading to intervention.
     
     Example (single dataset):
 ```python
@@ -223,6 +255,10 @@ class PiStar0_6AdvantagePlugin(DatasetPlugin):
         
         if 'frame_index' not in advantage_data.columns or 'advantage' not in advantage_data.columns:
             raise ValueError("Advantage file must contain 'frame_index' and 'advantage' columns")
+        
+        # Check if required_intervention column exists (optional for backward compatibility)
+        if 'required_intervention' not in advantage_data.columns:
+            print(f"  Note: 'required_intervention' column not found in {advantage_path}, will use only advantage values")
         
         return advantage_data
     

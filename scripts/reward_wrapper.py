@@ -541,7 +541,7 @@ def create_advantage_frame(
     
     # Current advantage display
     is_positive = current_advantage > threshold
-    adv_text = f'Advantage: {current_advantage:+.3f} ({"POSITIVE" if is_positive else "NEGATIVE"})'
+    adv_text = f'[REDACTED]: {current_advantage:+.3f} ({"POSITIVE" if is_positive else "NEGATIVE"})'
     text_color = (0, 255, 0) if is_positive else (0, 0, 255)
     text_size = cv2.getTextSize(adv_text, font, font_scale * 1.2, font_thickness + 1)[0]
     text_x = (canvas_width - text_size[0]) // 2

@@ -2,6 +2,7 @@
 """Advantage Calculator for pre-computing advantages from a trained value function."""
 
 import logging
+import time
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -13,7 +14,8 @@ from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from robocandywrapper import WrappedRobotDataset
 from robocandywrapper.plugins import EpisodeOutcomePlugin
 
-from rewact.plugins import PiStar0_6CumulativeRewardPlugin
+from rewact.plugins import PiStar0_6CumulativeRewardPlugin, ControlModePlugin
+from rewact.plugins.control_mode_plugin import CONTROL_MODE_HUMAN
 from rewact.policy import RewACTPolicy
 
 
@@ -63,7 +65,7 @@ class AdvantageCalculator:
         dataset = LeRobotDataset(self.dataset_path)
         wrapped_dataset = WrappedRobotDataset(
             datasets=[dataset],
-            plugins=[EpisodeOutcomePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=False)],
+            plugins=[EpisodeOutcomePlugin(), ControlModePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=False)],
         )
 
         # For denormalisation
@@ -89,9 +91,10 @@ class AdvantageCalculator:
         logging.info(f"Computing values for {len(wrapped_dataset)} frames across {num_episodes} episodes...")
         logging.info(f"Using batch size {self.batch_size} with {self.num_workers} dataloader workers")
         
-        # Collect all values and rewards in order
+        # Collect all values, rewards, and control modes in order
         all_values = []
         all_rewards = []
+        all_control_modes = []
         
         # Process batches through the model
         with torch.no_grad():
@@ -117,11 +120,21 @@ class AdvantageCalculator:
                 if rewards.dim() == 0:  # Single item batch
                     rewards = rewards.unsqueeze(0)
                 all_rewards.extend(rewards.tolist())
+                
+                # Get control modes from batch if available
+                all_control_modes.extend(batch['control_mode'])
         
         logging.info(f"Computed {len(all_values)} value predictions")
         
         # Create output directory
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Check if we have control mode data
+        has_control_mode = all_control_modes[0] is not None
+        if has_control_mode:
+            logging.info("Control mode data available - will track required interventions")
+        else:
+            logging.info("No control mode data - required_intervention will be False for all frames")
         
         # Now compute advantages per episode
         advantages = []
@@ -129,9 +142,10 @@ class AdvantageCalculator:
             episode_length = wrapped_dataset._datasets[0].meta.episodes[episode_idx]["length"]
             episode_start = wrapped_dataset._datasets[0].episode_data_index["from"][episode_idx].item()
             
-            # Get values and rewards for this episode
+            # Get values, rewards, and control modes for this episode
             episode_values = all_values[episode_start:episode_start + episode_length]
             episode_rewards = all_rewards[episode_start:episode_start + episode_length]
+            episode_control_modes = all_control_modes[episode_start:episode_start + episode_length]
             
             # Compute advantages for each frame in episode
             episode_advantages = []
@@ -149,10 +163,24 @@ class AdvantageCalculator:
                 # Advantage = [N-step return + V(future)] - V(current)
                 advantage = (n_step_return + future_value) - episode_values[t]
                 
+                # Check if future frame requires human intervention
+                # If current frame is not human control but future frame is, this action led to intervention
+                current_control_mode = episode_control_modes[t]
+                future_control_mode = episode_control_modes[n_step_end]
+                
+                required_intervention = False
+                if has_control_mode:
+                    # Check if current is not human but future is human (intervention was needed)
+                    required_intervention = (
+                        current_control_mode != CONTROL_MODE_HUMAN and 
+                        future_control_mode == CONTROL_MODE_HUMAN
+                    )
+                
                 episode_advantages.append({
                     'frame_index': episode_start + t,
                     'episode_idx': episode_idx,
                     'advantage': advantage,
+                    'required_intervention': required_intervention,
                 })
             
             # Write episode to parquet file
@@ -173,6 +201,7 @@ class AdvantageCalculator:
             "max": df['advantage'].max(),
             "positive_pct": (df['advantage'] > 0).mean() * 100,
             "num_frames": len(df),
+            "required_intervention_pct": (df['required_intervention']).mean() * 100,
         }
 
         logging.info(f"\nAdvantage statistics:")
@@ -181,6 +210,7 @@ class AdvantageCalculator:
         logging.info(f"  Min: {stats['min']:.4f}")
         logging.info(f"  Max: {stats['max']:.4f}")
         logging.info(f"  Positive: {stats['positive_pct']:.1f}%")
+        logging.info(f"  Required Intervention: {stats['required_intervention_pct']:.1f}%")
         
         logging.info(f"\nSaved {len(df['episode_idx'].unique())} episode files to: {self.output_dir}")
 
@@ -190,6 +220,59 @@ class AdvantageCalculator:
             "dataset_path": self.dataset_path,
             "value_model_path": self.value_model_path,
         }
+
+    def _upload_file_with_retry(
+        self, 
+        api, 
+        file_path: str, 
+        repo_path: str, 
+        repo_id: str, 
+        commit_message: str,
+        max_retries: int = 5,
+        initial_delay: float = 1.0,
+    ) -> bool:
+        """
+        Upload a file with exponential backoff retry logic.
+        
+        Args:
+            api: HfApi instance
+            file_path: Local path to file
+            repo_path: Path in the repository
+            repo_id: HuggingFace repo ID
+            commit_message: Commit message
+            max_retries: Maximum number of retry attempts
+            initial_delay: Initial delay in seconds (doubles each retry)
+            
+        Returns:
+            True if upload succeeded, False otherwise
+        """
+        delay = initial_delay
+        
+        for attempt in range(max_retries):
+            try:
+                api.upload_file(
+                    path_or_fileobj=file_path,
+                    path_in_repo=repo_path,
+                    repo_id=repo_id,
+                    repo_type="dataset",
+                    commit_message=commit_message,
+                )
+                return True
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logging.warning(
+                        f"Upload failed for {repo_path} (attempt {attempt + 1}/{max_retries}): {e}. "
+                        f"Retrying in {delay:.1f}s..."
+                    )
+                    time.sleep(delay)
+                    delay *= 2  # Exponential backoff
+                else:
+                    logging.error(
+                        f"Upload failed for {repo_path} after {max_retries} attempts: {e}"
+                    )
+                    return False
+        
+        return False
 
     def push_to_hub(self, repo_id: str, commit_message: Optional[str] = None) -> str:
         """
@@ -221,14 +304,17 @@ class AdvantageCalculator:
         parquet_files = list(self.output_dir.glob("*.parquet"))
         logging.info(f"Uploading {len(parquet_files)} parquet files...")
         
-        for parquet_file in tqdm(parquet_files):
-            api.upload_file(
-                path_or_fileobj=str(parquet_file),
-                path_in_repo=parquet_file.name,
+        failed_uploads = []
+        for parquet_file in tqdm(parquet_files, desc="Uploading parquet files"):
+            success = self._upload_file_with_retry(
+                api=api,
+                file_path=str(parquet_file),
+                repo_path=parquet_file.name,
                 repo_id=repo_id,
-                repo_type="dataset",
                 commit_message=commit_message or f"Add {parquet_file.name}",
             )
+            if not success:
+                failed_uploads.append(parquet_file.name)
         
         # Create a README with metadata
         readme_content = f"""---
@@ -266,15 +352,29 @@ advantage_df = pd.read_parquet("episode_00000.parquet")
         readme_path = self.output_dir / "README.md"
         readme_path.write_text(readme_content)
         
-        api.upload_file(
-            path_or_fileobj=str(readme_path),
-            path_in_repo="README.md",
+        readme_success = self._upload_file_with_retry(
+            api=api,
+            file_path=str(readme_path),
+            repo_path="README.md",
             repo_id=repo_id,
-            repo_type="dataset",
             commit_message=commit_message or "Add README",
         )
         
+        if not readme_success:
+            logging.warning("Failed to upload README.md")
+        
+        # Report upload results
         hub_url = f"https://huggingface.co/datasets/{repo_id}"
+        
+        if failed_uploads:
+            logging.warning(
+                f"Upload completed with {len(failed_uploads)} failures out of {len(parquet_files)} files. "
+                f"Failed files: {', '.join(failed_uploads[:10])}"
+                + (f" and {len(failed_uploads) - 10} more..." if len(failed_uploads) > 10 else "")
+            )
+        else:
+            logging.info(f"All {len(parquet_files)} parquet files uploaded successfully!")
+        
         logging.info(f"Advantages pushed to: {hub_url}")
         
         return hub_url

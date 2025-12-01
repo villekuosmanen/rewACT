@@ -200,7 +200,12 @@ class ACTvantageTrainer:
 
         step = 0
 
-        if cfg.resume:
+        # Try to resume from Hub checkpoint first
+        if cfg.policy.push_to_hub and cfg.policy.repo_id:
+            step = self._try_resume_from_hub(policy, optimizer, lr_scheduler, cfg)
+        
+        # Fall back to local checkpoint if specified
+        if cfg.resume and step == 0:
             step, optimizer, lr_scheduler = load_training_state(cfg.checkpoint_path, optimizer, lr_scheduler)
 
         num_learnable_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
@@ -295,7 +300,7 @@ class ACTvantageTrainer:
                     self.wandb_logger.log_dict(wandb_log_dict, step)
                 train_tracker.reset_averages()
 
-            if cfg.save_checkpoint and is_saving_step:
+            if is_saving_step:
                 logging.info(f"Checkpoint policy after step {step}")
                 checkpoint_dir = get_step_checkpoint_dir(cfg.output_dir, cfg.steps, step)
                 save_checkpoint(checkpoint_dir, step, cfg, policy, optimizer, lr_scheduler)
@@ -356,6 +361,9 @@ class ACTvantageTrainer:
             policy.push_model_to_hub(cfg)
             model_repo_id = cfg.policy.repo_id
             logging.info(f"Model pushed to Hub: {model_repo_id}")
+            
+            # Also save training state for resumption
+            self._save_training_state_to_hub(optimizer, lr_scheduler, step, cfg.policy.repo_id)
 
         return {
             "model_repo_id": model_repo_id,
@@ -363,6 +371,101 @@ class ACTvantageTrainer:
             "final_loss": train_tracker.loss.avg,
             "total_steps": step,
         }
+
+    def _save_training_state_to_hub(self, optimizer, lr_scheduler, step, repo_id):
+        """Save training state (optimizer, scheduler, step) to Hub for resumption."""
+        try:
+            from huggingface_hub import HfApi
+            import tempfile
+            
+            api = HfApi()
+            
+            # Save training state to temp file
+            training_state = {
+                "step": step,
+                "optimizer": optimizer.state_dict(),
+            }
+            if lr_scheduler:
+                training_state["lr_scheduler"] = lr_scheduler.state_dict()
+            
+            with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.pth') as f:
+                torch.save(training_state, f)
+                temp_path = f.name
+            
+            # Upload to Hub
+            api.upload_file(
+                path_or_fileobj=temp_path,
+                path_in_repo="training_state.pth",
+                repo_id=repo_id,
+                repo_type="model",
+                commit_message=f"Save training state at step {step}",
+            )
+            
+            # Clean up temp file
+            Path(temp_path).unlink()
+            logging.info(f"✓ Saved training state to Hub")
+            
+        except Exception as e:
+            logging.warning(f"Failed to save training state to Hub: {e}")
+
+    def _try_resume_from_hub(self, policy, optimizer, lr_scheduler, cfg) -> int:
+        """Try to resume training from existing Hub checkpoint.
+        
+        Returns:
+            step: The step number to resume from (0 if no checkpoint found)
+        """
+        try:
+            from huggingface_hub import HfApi, hf_hub_download
+            from huggingface_hub.utils import RepositoryNotFoundError, HfHubHTTPError
+            
+            api = HfApi()
+            repo_id = cfg.policy.repo_id
+            
+            logging.info(f"Checking for existing checkpoint on Hub: {repo_id}")
+            
+            # Check if repo exists
+            try:
+                repo_info = api.repo_info(repo_id, repo_type="model")
+                logging.info(f"✓ Found existing model on Hub: {repo_id}")
+            except (RepositoryNotFoundError, HfHubHTTPError):
+                logging.info(f"No existing checkpoint found on Hub. Starting fresh training.")
+                return 0
+            
+            # Try to download the checkpoint
+            try:
+                # Download pretrained_model.safetensors (the main model file)
+                model_path = hf_hub_download(repo_id=repo_id, filename="pretrained_model.safetensors")
+                
+                # Load the model weights
+                from safetensors.torch import load_file
+                state_dict = load_file(model_path)
+                policy.load_state_dict(state_dict)
+                logging.info(f"✓ Loaded model weights from Hub")
+                
+                # Try to get training state (optimizer, scheduler, step)
+                try:
+                    training_state_path = hf_hub_download(repo_id=repo_id, filename="training_state.pth")
+                    training_state = torch.load(training_state_path, map_location="cpu")
+                    
+                    step = training_state.get("step", 0)
+                    optimizer.load_state_dict(training_state.get("optimizer", optimizer.state_dict()))
+                    if lr_scheduler and "lr_scheduler" in training_state:
+                        lr_scheduler.load_state_dict(training_state["lr_scheduler"])
+                    
+                    logging.info(f"✓ Resuming training from step {step}")
+                    return step
+                except Exception as e:
+                    # If training state doesn't exist, just use the model weights
+                    logging.info(f"No training state found, starting from step 0 with pretrained weights")
+                    return 0
+                    
+            except Exception as e:
+                logging.warning(f"Could not load checkpoint from Hub: {e}")
+                return 0
+                
+        except Exception as e:
+            logging.warning(f"Error checking Hub for checkpoint: {e}")
+            return 0
 
     def _push_checkpoint_to_hub(self, policy, cfg, step):
         """Push intermediate checkpoint to Hub."""

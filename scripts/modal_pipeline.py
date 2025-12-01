@@ -25,7 +25,7 @@ from datetime import datetime
 
 import modal
 
-TRAIN_VERSION = "1.3.0"
+TRAIN_VERSION = "1.4.0"
 
 # Define the Modal app
 app = modal.App("rewact-training-pipeline")
@@ -34,13 +34,14 @@ volume = modal.Volume.from_name("rewact-datasets-cache", create_if_missing=True)
 # Define the Docker image with all dependencies
 image = (
     modal.Image.from_registry(
-        "nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04",
+        # "nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04",
+        "nvidia/cuda:12.9.1-cudnn-runtime-ubuntu24.04",
         add_python="3.10",
     )
     .run_commands(
         "DEBIAN_FRONTEND=noninteractive apt-get update",
-        "DEBIAN_FRONTEND=noninteractive apt-get install -y git libgl1-mesa-glx libglib2.0-0",
-        "apt-get update && apt-get install -y --no-install-recommends python3.10 python3-pip python3-dev git wget curl ffmpeg libsm6 libxext6 linux-headers-generic build-essential clang && update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1 && update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 && rm -rf /var/lib/apt/lists/*",
+        "DEBIAN_FRONTEND=noninteractive apt-get install -y git libglib2.0-0",
+        "apt-get update && apt-get install -y --no-install-recommends python3.10 python3-pip python3-dev git wget curl ffmpeg libsm6 libxext6 linux-headers-generic build-essential clang && rm -rf /var/lib/apt/lists/*",
     )
     # .apt_install(
     #     "python3-dev",
@@ -102,7 +103,7 @@ def send_discord_notification(message: str, embed: Optional[Dict] = None):
 @app.function(
     image=image,
     gpu="H100",
-    cpu=8.0, # 8 cores
+    cpu=12.0,
     memory=65536, # 64GB memory
     timeout=86400,  # 24 hours
     volumes={"/root/.cache/huggingface": volume},  # Cache HF datasets
@@ -216,7 +217,7 @@ def train_value_function(
 @app.function(
     image=image,
     gpu="A10",  # Cheaper GPU for inference
-    cpu=16.0, # 8 cores
+    cpu=8.0, # 8 cores
     memory=8192, # 8GB memory - requires intense processing
     timeout=7200,  # 2 hours per dataset
     volumes={"/root/.cache/huggingface": volume},  # Cache HF datasets
@@ -304,7 +305,7 @@ def compute_advantages(
 @app.function(
     image=image,
     gpu="H100",
-    cpu=8.0, # 8 cores
+    cpu=12.0,
     memory=65536, # 64GB memory
     timeout=86400,  # 24 hours
     volumes={"/root/.cache/huggingface": volume},  # Cache HF datasets
@@ -426,7 +427,8 @@ def train_actvantage_policy(
 
 @app.function(
     image=image,
-    timeout=86400,  # 5 minutes
+    timeout=86400,  # 24 hours
+    nonpreemptible=True,
     secrets=[modal.Secret.from_name("discord-webhook")],
 )
 async def orchestrate_pipeline(
@@ -601,7 +603,7 @@ async def orchestrate_pipeline(
 def main(
     
     # Dataset configuration
-    datasets: str = "villekuosmanen/pack_toothbrush_Nov19,villekuosmanen/pack_toothbrush_Nov26,villekuosmanen/dAgger_pack_toothbrush_Nov22,villekuosmanen/dAgger_pack_toothbrush_Nov26,villekuosmanen/dAgger_pack_toothbrush_Nov28",
+    datasets: str = "villekuosmanen/pack_toothbrush_Nov19,villekuosmanen/pack_toothbrush_Nov26,villekuosmanen/dAgger_pack_toothbrush_Nov22,villekuosmanen/dAgger_pack_toothbrush_Nov26,villekuosmanen/dAgger_pack_toothbrush_Nov28,villekuosmanen/dAgger_pack_toothbrush_Nov30",
     
     # Output configuration
     value_function_repo: str = f"villekuosmanen/rewact_toothbrush_pistar_{TRAIN_VERSION}",
@@ -619,9 +621,9 @@ def main(
     advantage_percentile: float = 30.0,
     
     # Pipeline control
-    skip_value_training: bool = False,
+    skip_value_training: bool = True,
     skip_advantage_computation: bool = False,
-    skip_policy_training: bool = False,
+    skip_policy_training: bool = True,
     
     # Checkpoint configuration
     checkpoint_push_freq: int = 2000,
