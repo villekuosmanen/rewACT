@@ -29,16 +29,13 @@ from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.sampler import EpisodeAwareSampler
 from lerobot.datasets.utils import cycle
-from lerobot.envs.factory import make_env
 from lerobot.optim.factory import make_optimizer_and_scheduler
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import get_device_from_parameters
-from lerobot.scripts.eval import eval_policy
 from lerobot.utils.logging_utils import AverageMeter, MetricsTracker
 from lerobot.utils.random_utils import set_seed
 from lerobot.utils.train_utils import (
     get_step_checkpoint_dir,
-    get_step_identifier,
     load_training_state,
     save_checkpoint,
     update_last_checkpoint,
@@ -56,6 +53,8 @@ from robocandywrapper import make_dataset
 
 from rewact.plugins import PiStar0_6CumulativeRewardPlugin, ControlModePlugin
 from rewact.utils import make_actvantage_policy
+from rewact.policies.factory import make_pre_post_processors
+
 
 def update_policy(
     train_metrics: MetricsTracker,
@@ -136,11 +135,10 @@ def train(cfg: TrainPipelineConfig):
     
     # For multiple dataset training, provide a mapping of repo_id to advantage directory:
     advantage_dirs = {
-        "villekuosmanen/pack_toothbrush_Nov19": Path("outputs/pack_toothbrush_Nov19-advantages"),
-        "villekuosmanen/pack_toothbrush_Nov26": Path("outputs/pack_toothbrush_Nov26-advantages"),
-        "villekuosmanen/dAgger_pack_toothbrush_Nov22": Path("outputs/dAgger_pack_toothbrush_Nov22-advantages"),
-        "villekuosmanen/dAgger_pack_toothbrush_Nov26": Path("outputs/dAgger_pack_toothbrush_Nov26-advantages"),
-        "villekuosmanen/dAgger_pack_toothbrush_Nov28": Path("outputs/dAgger_pack_toothbrush_Nov28-advantages"),
+        "villekuosmanen/build_block_tower": Path("outputs/build_block_tower-advantages"),
+        "villekuosmanen/dAgger_build_block_tower_1.0.0": Path("outputs/dAgger_build_block_tower_1.0.0-advantages"),
+        "villekuosmanen/dAgger_build_block_tower_1.1.0": Path("outputs/dAgger_build_block_tower_1.1.0-advantages"),
+        "villekuosmanen/dAgger_build_block_tower_1.2.0": Path("outputs/dAgger_build_block_tower_1.2.0-advantages"),
     }
     
     # Validate all directories exist
@@ -155,23 +153,46 @@ def train(cfg: TrainPipelineConfig):
     advantage_plugin = PiStar0_6AdvantagePlugin(
         advantage_file=advantage_dirs,  # Now accepts dict for multiple datasets
         use_percentile_threshold=True,
-        percentile=40.0,  # Can be configured
+        percentile=50.0,  # Can be configured
     )
-
     dataset = make_dataset(cfg, plugins=[EpisodeOutcomePlugin(), ControlModePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True), advantage_plugin])
 
-    # Create environment used for evaluating checkpoints during training on simulation data.
-    # On real-world data, no need to create an environment as evaluations are done outside train.py,
-    # using the eval.py instead, with gym_dora environment and dora-rs.
-    eval_env = None
-    if cfg.eval_freq > 0 and cfg.env is not None:
-        logging.info("Creating env")
-        eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
-
-    logging.info("Creating policy")
-    
-    # Create RewACT policy using the utility function
+    logging.info("Creating policy")    
     policy = make_actvantage_policy(cfg.policy, dataset.meta)
+
+    # Create processors - only provide dataset_stats if not resuming from saved processors
+    processor_kwargs = {}
+    postprocessor_kwargs = {}
+    if (cfg.policy.pretrained_path and not cfg.resume) or not cfg.policy.pretrained_path:
+        # Only provide dataset_stats when not resuming from saved processor state
+        processor_kwargs["dataset_stats"] = dataset.meta.stats
+
+    if cfg.policy.pretrained_path is not None:
+        processor_kwargs["preprocessor_overrides"] = {
+            "device_processor": {"device": device.type},
+            "normalizer_processor": {
+                "stats": dataset.meta.stats,
+                "features": {**policy.config.input_features, **policy.config.output_features},
+                "norm_map": policy.config.normalization_mapping,
+            },
+        }
+        processor_kwargs["preprocessor_overrides"]["rename_observations_processor"] = {
+            "rename_map": cfg.rename_map
+        }
+        postprocessor_kwargs["postprocessor_overrides"] = {
+            "unnormalizer_processor": {
+                "stats": dataset.meta.stats,
+                "features": policy.config.output_features,
+                "norm_map": policy.config.normalization_mapping,
+            },
+        }
+    preprocessor, postprocessor = make_pre_post_processors(
+        policy_cfg=cfg.policy,
+        pretrained_path=cfg.policy.pretrained_path,
+        plugin_features=dataset.plugin_features,
+        **processor_kwargs,
+        **postprocessor_kwargs,
+    )
 
     logging.info("Creating optimizer and scheduler")
     optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)
@@ -186,8 +207,6 @@ def train(cfg: TrainPipelineConfig):
     num_total_params = sum(p.numel() for p in policy.parameters())
 
     logging.info(colored("Output dir:", "yellow", attrs=["bold"]) + f" {cfg.output_dir}")
-    if cfg.env is not None:
-        logging.info(f"{cfg.env.task=}")
     logging.info(f"{cfg.steps=} ({format_big_number(cfg.steps)})")
     logging.info(f"{dataset.num_frames=} ({format_big_number(dataset.num_frames)})")
     logging.info(f"{dataset.num_episodes=}")
@@ -212,8 +231,11 @@ def train(cfg: TrainPipelineConfig):
         batch_size=cfg.batch_size,
         shuffle=shuffle,
         sampler=sampler,
-        pin_memory=device.type == "cuda",
+        pin_memory=True,
+        prefetch_factor=2,
+        persistent_workers=True,
         drop_last=False,
+        multiprocessing_context='spawn',
     )
     dl_iter = cycle(dataloader)
 
@@ -235,6 +257,7 @@ def train(cfg: TrainPipelineConfig):
     for _ in range(step, cfg.steps):
         start_time = time.perf_counter()
         batch = next(dl_iter)
+        batch = preprocessor(batch)
         train_tracker.dataloading_s = time.perf_counter() - start_time
 
         for key in batch:
@@ -258,7 +281,6 @@ def train(cfg: TrainPipelineConfig):
         train_tracker.step()
         is_log_step = cfg.log_freq > 0 and step % cfg.log_freq == 0
         is_saving_step = step % cfg.save_freq == 0 or step == cfg.steps
-        is_eval_step = cfg.eval_freq > 0 and step % cfg.eval_freq == 0
 
         if is_log_step:
             logging.info(train_tracker)
@@ -272,46 +294,20 @@ def train(cfg: TrainPipelineConfig):
         if cfg.save_checkpoint and is_saving_step:
             logging.info(f"Checkpoint policy after step {step}")
             checkpoint_dir = get_step_checkpoint_dir(cfg.output_dir, cfg.steps, step)
-            save_checkpoint(checkpoint_dir, step, cfg, policy, optimizer, lr_scheduler)
+            save_checkpoint(
+                checkpoint_dir=checkpoint_dir,
+                step=step,
+                cfg=cfg,
+                policy=policy,
+                optimizer=optimizer,
+                scheduler=lr_scheduler,
+                preprocessor=preprocessor,
+                postprocessor=postprocessor,
+            )
             update_last_checkpoint(checkpoint_dir)
             if wandb_logger:
                 wandb_logger.log_policy(checkpoint_dir)
 
-        if cfg.env and is_eval_step:
-            step_id = get_step_identifier(step, cfg.steps)
-            logging.info(f"Eval policy at step {step}")
-            with (
-                torch.no_grad(),
-                torch.autocast(device_type=device.type) if cfg.policy.use_amp else nullcontext(),
-            ):
-                eval_info = eval_policy(
-                    eval_env,
-                    policy,
-                    cfg.eval.n_episodes,
-                    videos_dir=cfg.output_dir / "eval" / f"videos_step_{step_id}",
-                    max_episodes_rendered=4,
-                    start_seed=cfg.seed,
-                )
-
-            eval_metrics = {
-                "avg_sum_reward": AverageMeter("∑rwrd", ":.3f"),
-                "pc_success": AverageMeter("success", ":.1f"),
-                "eval_s": AverageMeter("eval_s", ":.3f"),
-            }
-            eval_tracker = MetricsTracker(
-                cfg.batch_size, dataset.num_frames, dataset.num_episodes, eval_metrics, initial_step=step
-            )
-            eval_tracker.eval_s = eval_info["aggregated"].pop("eval_s")
-            eval_tracker.avg_sum_reward = eval_info["aggregated"].pop("avg_sum_reward")
-            eval_tracker.pc_success = eval_info["aggregated"].pop("pc_success")
-            logging.info(eval_tracker)
-            if wandb_logger:
-                wandb_log_dict = {**eval_tracker.to_dict(), **eval_info}
-                wandb_logger.log_dict(wandb_log_dict, step, mode="eval")
-                wandb_logger.log_video(eval_info["video_paths"][0], step, mode="eval")
-
-    if eval_env:
-        eval_env.close()
     logging.info("End of training")
 
     if cfg.policy.push_to_hub:
@@ -322,7 +318,8 @@ def train(cfg: TrainPipelineConfig):
             datasets = [ds.strip('\'\" ') for ds in datasets_str.split(',')]
             cfg.dataset.repo_id = datasets
         policy.push_model_to_hub(cfg)
-
+        preprocessor.push_to_hub(cfg.policy.repo_id)
+        postprocessor.push_to_hub(cfg.policy.repo_id)
 
 def main():
     init_logging()

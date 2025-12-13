@@ -15,17 +15,19 @@ from tqdm import tqdm
 
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from robocandywrapper.dataformats.lerobot_21 import LeRobot21Dataset
 
 from reward_wrapper import ACTPolicyWithReward, create_reward_visualization_video
 from rewact.utils import make_rewact_policy
-from robocandywrapper.dataformats.lerobot_21 import LeRobot21Dataset
+from rewact.policies.factory import make_pre_post_processors
+
 
 def none_or_int(value):
     if value == "None":
         return None
     return int(value)
 
-def load_policy(policy_path: str, dataset_meta, policy_overrides: list = None) -> Tuple[torch.nn.Module, dict]:
+def load_policy(policy_path: str, dataset, dataset_meta, policy_overrides: list = None) -> Tuple[torch.nn.Module, dict]:
     """Load and initialize a policy from checkpoint."""
     
     # Load regular LeRobot policy
@@ -42,9 +44,15 @@ def load_policy(policy_path: str, dataset_meta, policy_overrides: list = None) -
 
     # Create RewACT policy using the utility function
     policy = make_rewact_policy(policy_cfg, dataset_meta)
-    policy = ACTPolicyWithReward(policy)
+
+    preprocessor, postprocessor = make_pre_post_processors(
+        policy_cfg,
+        pretrained_path=policy_path,
+        dataset_stats=dataset_meta.stats,
+        plugin_features=dataset.plugin_features,
+    )
         
-    return policy, policy_cfg
+    return policy, policy_cfg, preprocessor, postprocessor
 
 def prepare_observation_for_policy(frame: dict, 
                                  device: torch.device, 
@@ -115,6 +123,8 @@ def prepare_observation_for_policy(frame: dict,
 def analyze_episode(
     dataset: LeRobotDataset,
     policy,
+    preprocessor,
+    postprocessor,
     episode_id: int,
     device: torch.device,
     model_dtype: torch.dtype = torch.float32
@@ -176,7 +186,9 @@ def analyze_episode(
                 
         # Run policy inference
         with torch.inference_mode():
-            _, reward = policy.select_action(observation)
+            batch = preprocessor(observation)
+            _, reward = policy.select_action(batch)
+            policy.reset()
 
             reward_data.append({
                 'step': timestamp_counter,
@@ -261,8 +273,10 @@ def main():
     
     # Load policy
     print("Loading policy...")
-    policy, _ = load_policy(
+    # TODO this currently will not work
+    policy, _, preprocessor, postprocessor = load_policy(
         args.policy_path,
+        dataset,
         dataset.meta,
         args.policy_overrides
     )
@@ -280,6 +294,8 @@ def main():
         analyze_episode(
             dataset=dataset,
             policy=policy,
+            preprocessor=preprocessor,
+            postprocessor=postprocessor,
             episode_id=episode_id,
             device=device,
             model_dtype=model_dtype

@@ -14,25 +14,20 @@ from torch.amp import GradScaler
 from torch.optim import Optimizer
 
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.datasets.sampler import EpisodeAwareSampler
 from lerobot.datasets.utils import cycle
-from lerobot.envs.factory import make_env
 from lerobot.optim.factory import make_optimizer_and_scheduler
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import get_device_from_parameters
-from lerobot.scripts.eval import eval_policy
 from lerobot.utils.logging_utils import AverageMeter, MetricsTracker
 from lerobot.utils.random_utils import set_seed
 from lerobot.utils.train_utils import (
     get_step_checkpoint_dir,
-    get_step_identifier,
     load_training_state,
     save_checkpoint,
     update_last_checkpoint,
 )
 from lerobot.utils.utils import (
     format_big_number,
-    get_safe_torch_device,
     has_method,
 )
 from robocandywrapper import WandBLogger
@@ -41,6 +36,7 @@ from robocandywrapper import make_dataset
 
 from rewact.plugins import PiStar0_6CumulativeRewardPlugin
 from rewact.utils import make_rewact_policy
+from rewact.policies.factory import make_pre_post_processors
 
 
 def update_policy(
@@ -161,14 +157,43 @@ class RewACTTrainer:
             cfg, plugins=[EpisodeOutcomePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True)]
         )
 
-        # Create environment for evaluation
-        eval_env = None
-        if cfg.eval_freq > 0 and cfg.env is not None:
-            logging.info("Creating env")
-            eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
-
         logging.info("Creating policy")
         policy = make_rewact_policy(cfg.policy, dataset.meta)
+
+        # Create processors - only provide dataset_stats if not resuming from saved processors
+        processor_kwargs = {}
+        postprocessor_kwargs = {}
+        if (cfg.policy.pretrained_path and not cfg.resume) or not cfg.policy.pretrained_path:
+            # Only provide dataset_stats when not resuming from saved processor state
+            processor_kwargs["dataset_stats"] = dataset.meta.stats
+
+        if cfg.policy.pretrained_path is not None:
+            processor_kwargs["preprocessor_overrides"] = {
+                "device_processor": {"device": device.type},
+                "normalizer_processor": {
+                    "stats": dataset.meta.stats,
+                    "features": {**policy.config.input_features, **policy.config.output_features},
+                    "norm_map": policy.config.normalization_mapping,
+                },
+            }
+            processor_kwargs["preprocessor_overrides"]["rename_observations_processor"] = {
+                "rename_map": cfg.rename_map
+            }
+            postprocessor_kwargs["postprocessor_overrides"] = {
+                "unnormalizer_processor": {
+                    "stats": dataset.meta.stats,
+                    "features": policy.config.output_features,
+                    "norm_map": policy.config.normalization_mapping,
+                },
+            }
+        preprocessor, postprocessor = make_pre_post_processors(
+            policy_cfg=cfg.policy,
+            pretrained_path=cfg.policy.pretrained_path,
+            plugin_features=dataset.plugin_features,
+            **processor_kwargs,
+            **postprocessor_kwargs,
+        )
+
 
         logging.info("Creating optimizer and scheduler")
         optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)
@@ -188,8 +213,6 @@ class RewACTTrainer:
         num_total_params = sum(p.numel() for p in policy.parameters())
 
         logging.info(colored("Output dir:", "yellow", attrs=["bold"]) + f" {cfg.output_dir}")
-        if cfg.env is not None:
-            logging.info(f"{cfg.env.task=}")
         logging.info(f"{cfg.steps=} ({format_big_number(cfg.steps)})")
         logging.info(f"{dataset.num_frames=} ({format_big_number(dataset.num_frames)})")
         logging.info(f"{dataset.num_episodes=}")
@@ -237,6 +260,7 @@ class RewACTTrainer:
         for _ in range(step, cfg.steps):
             start_time = time.perf_counter()
             batch = next(dl_iter)
+            batch = preprocessor(batch)
             train_tracker.dataloading_s = time.perf_counter() - start_time
 
             for key in batch:
@@ -276,7 +300,16 @@ class RewACTTrainer:
             if is_saving_step:
                 logging.info(f"Checkpoint policy after step {step}")
                 checkpoint_dir = get_step_checkpoint_dir(cfg.output_dir, cfg.steps, step)
-                save_checkpoint(checkpoint_dir, step, cfg, policy, optimizer, lr_scheduler)
+                save_checkpoint(
+                    checkpoint_dir=checkpoint_dir,
+                    step=step,
+                    cfg=cfg,
+                    policy=policy,
+                    optimizer=optimizer,
+                    scheduler=lr_scheduler,
+                    preprocessor=preprocessor,
+                    postprocessor=postprocessor,
+                )
                 update_last_checkpoint(checkpoint_dir)
                 if self.wandb_logger:
                     self.wandb_logger.log_policy(checkpoint_dir)
@@ -284,43 +317,8 @@ class RewACTTrainer:
                 # Push checkpoint to Hub if configured
                 if is_checkpoint_push_step and cfg.policy.push_to_hub:
                     logging.info(f"Pushing checkpoint {step} to Hub")
-                    self._push_checkpoint_to_hub(policy, cfg, step)
+                    self._push_checkpoint_to_hub(policy, cfg)
 
-            if cfg.env and is_eval_step:
-                step_id = get_step_identifier(step, cfg.steps)
-                logging.info(f"Eval policy at step {step}")
-                with (
-                    torch.no_grad(),
-                    torch.autocast(device_type=device.type) if cfg.policy.use_amp else nullcontext(),
-                ):
-                    eval_info = eval_policy(
-                        eval_env,
-                        policy,
-                        cfg.eval.n_episodes,
-                        videos_dir=cfg.output_dir / "eval" / f"videos_step_{step_id}",
-                        max_episodes_rendered=4,
-                        start_seed=cfg.seed,
-                    )
-
-                eval_metrics = {
-                    "avg_sum_reward": AverageMeter("∑rwrd", ":.3f"),
-                    "pc_success": AverageMeter("success", ":.1f"),
-                    "eval_s": AverageMeter("eval_s", ":.3f"),
-                }
-                eval_tracker = MetricsTracker(
-                    cfg.batch_size, dataset.num_frames, dataset.num_episodes, eval_metrics, initial_step=step
-                )
-                eval_tracker.eval_s = eval_info["aggregated"].pop("eval_s")
-                eval_tracker.avg_sum_reward = eval_info["aggregated"].pop("avg_sum_reward")
-                eval_tracker.pc_success = eval_info["aggregated"].pop("pc_success")
-                logging.info(eval_tracker)
-                if self.wandb_logger:
-                    wandb_log_dict = {**eval_tracker.to_dict(), **eval_info}
-                    self.wandb_logger.log_dict(wandb_log_dict, step, mode="eval")
-                    self.wandb_logger.log_video(eval_info["video_paths"][0], step, mode="eval")
-
-        if eval_env:
-            eval_env.close()
         logging.info("End of training")
 
         # Push final model to Hub
@@ -332,6 +330,8 @@ class RewACTTrainer:
                 datasets = [ds.strip('\'\" ') for ds in datasets_str.split(',')]
                 cfg.dataset.repo_id = datasets
             policy.push_model_to_hub(cfg)
+            preprocessor.push_to_hub(cfg.policy.repo_id)
+            postprocessor.push_to_hub(cfg.policy.repo_id)
             model_repo_id = cfg.policy.repo_id
             logging.info(f"Model pushed to Hub: {model_repo_id}")
             
@@ -440,7 +440,7 @@ class RewACTTrainer:
             logging.warning(f"Error checking Hub for checkpoint: {e}")
             return 0
 
-    def _push_checkpoint_to_hub(self, policy, cfg, step):
+    def _push_checkpoint_to_hub(self, policy, cfg):
         """Push intermediate checkpoint to Hub."""
         try:            
             policy.push_model_to_hub(cfg)

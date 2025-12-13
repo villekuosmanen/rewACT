@@ -25,7 +25,7 @@ from datetime import datetime
 
 import modal
 
-TRAIN_VERSION = "1.4.0"
+TRAIN_VERSION = "1.3.0"
 
 # Define the Modal app
 app = modal.App("rewact-training-pipeline")
@@ -58,7 +58,7 @@ image = (
     # )
     .uv_pip_install(
         # Core dependencies
-        "lerobot==0.3.3",
+        "lerobot==0.4.2",
         "einops>=0.6.0",
         "scipy>=1.7.0",
         # Additional dependencies
@@ -603,27 +603,27 @@ async def orchestrate_pipeline(
 def main(
     
     # Dataset configuration
-    datasets: str = "villekuosmanen/pack_toothbrush_Nov19,villekuosmanen/pack_toothbrush_Nov26,villekuosmanen/dAgger_pack_toothbrush_Nov22,villekuosmanen/dAgger_pack_toothbrush_Nov26,villekuosmanen/dAgger_pack_toothbrush_Nov28,villekuosmanen/dAgger_pack_toothbrush_Nov30",
+    datasets: str = "villekuosmanen/build_block_tower, villekuosmanen/dAgger_build_block_tower_1.0.0, villekuosmanen/dAgger_build_block_tower_1.1.0, villekuosmanen/dAgger_build_block_tower_1.2.0",
     
     # Output configuration
-    value_function_repo: str = f"villekuosmanen/rewact_toothbrush_pistar_{TRAIN_VERSION}",
-    actvantage_repo: str = f"villekuosmanen/actvantage_toothbrush_pistar_{TRAIN_VERSION}",
+    value_function_repo: str = f"villekuosmanen/rewact_build_block_tower_{TRAIN_VERSION}",
+    actvantage_repo: str = f"villekuosmanen/actvantage_build_block_tower_{TRAIN_VERSION}",
     
     # Job names
-    value_job_name: str = f"rewact_toothbrush_pistar_{TRAIN_VERSION}",
-    policy_job_name: str = f"actvantage_toothbrush_pistar_{TRAIN_VERSION}",
+    value_job_name: str = f"rewact_build_block_tower_{TRAIN_VERSION}",
+    policy_job_name: str = f"actvantage_build_block_tower_{TRAIN_VERSION}",
     
     # Training hyperparameters
-    value_steps: int = 18000,
-    policy_steps: int = 36000,
+    value_steps: int = 100,
+    policy_steps: int = 50000,
     batch_size: int = 64,
     n_step_advantage: int = 50,
     advantage_percentile: float = 30.0,
     
     # Pipeline control
     skip_value_training: bool = True,
-    skip_advantage_computation: bool = False,
-    skip_policy_training: bool = True,
+    skip_advantage_computation: bool = True,
+    skip_policy_training: bool = False,
     
     # Checkpoint configuration
     checkpoint_push_freq: int = 2000,

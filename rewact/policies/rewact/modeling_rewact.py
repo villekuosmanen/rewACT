@@ -23,8 +23,7 @@ from torch import Tensor, nn
 from torchvision.models._utils import IntermediateLayerGetter
 from torchvision.ops.misc import FrozenBatchNorm2d
 
-from lerobot.constants import ACTION, OBS_IMAGES
-from lerobot.policies.normalize import Normalize, Unnormalize
+from lerobot.utils.constants import ACTION, OBS_IMAGES, OBS_STATE, OBS_ENV_STATE
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.act.modeling_act import (
     ACTTemporalEnsembler,
@@ -34,7 +33,7 @@ from lerobot.policies.act.modeling_act import (
     create_sinusoidal_pos_embedding,
 )
 
-from rewact.policy import RewACTConfig
+from rewact.policies.rewact.configuration_rewact import RewACTConfig
 
 
 class RewACTPolicy(PreTrainedPolicy):
@@ -60,14 +59,6 @@ class RewACTPolicy(PreTrainedPolicy):
         super().__init__(config)
         config.validate_features()
         self.config = config
-
-        self.normalize_inputs = Normalize(config.input_features, config.normalization_mapping, dataset_stats)
-        self.normalize_targets = Normalize(
-            config.output_features, config.normalization_mapping, dataset_stats
-        )
-        self.unnormalize_outputs = Unnormalize(
-            config.output_features, config.normalization_mapping, dataset_stats
-        )
 
         self.model = RewACT(config)
 
@@ -142,30 +133,25 @@ class RewACTPolicy(PreTrainedPolicy):
         if self.config.temporal_ensemble_coeff is not None:
             actions, reward_output = self.predict_action_chunk(batch)
             action = self.temporal_ensembler.update(actions)
-            if reward_output is not None:
-                # Use expected value for inference
-                reward_pred = reward_output['expected_value'][0, 0]
-                reward_pred = torch.clamp(reward_pred, 0.0, 1.0)
-                return action, reward_pred
-            else:
-                return action, None
+            # Use expected value for inference
+            reward_pred = reward_output['expected_value'][0, 0]
+            reward_pred = torch.clamp(reward_pred, 0.0, 1.0)
+            return action, reward_pred
 
         # Action queue logic for n_action_steps > 1
         if len(self._action_queue) == 0:
             actions, reward_output = self.predict_action_chunk(batch)
             actions = actions[:, : self.config.n_action_steps]
 
-            if reward_output is not None:
-                # Use expected value for inference
-                current_reward_pred = reward_output['expected_value'][0, 0]
-                current_reward_pred = torch.clamp(current_reward_pred, 0.0, 1.0)
-
+            # Use expected value for inference
+            current_reward_pred = reward_output['expected_value'][0, 0]
+            current_reward_pred = torch.clamp(current_reward_pred, 0.0, 1.0)
             self._action_queue.extend(actions.transpose(0, 1))
+
         elif force_model_run:
             _, reward_output = self.predict_action_chunk(batch)
-            if reward_output is not None:
-                current_reward_pred = reward_output['expected_value'][0, 0]
-                current_reward_pred = torch.clamp(current_reward_pred, 0.0, 1.0)
+            current_reward_pred = reward_output['expected_value'][0, 0]
+            current_reward_pred = torch.clamp(current_reward_pred, 0.0, 1.0)
 
         return self._action_queue.popleft(), current_reward_pred
 
@@ -174,23 +160,19 @@ class RewACTPolicy(PreTrainedPolicy):
         """Predict a chunk of actions given environment observations."""
         self.eval()
 
-        batch = self.normalize_inputs(batch)
         if self.config.image_features:
             batch = dict(batch)
             batch[OBS_IMAGES] = [batch[key] for key in self.config.image_features]
 
         actions, reward_output, _ = self.model(batch)
-        actions = self.unnormalize_outputs({ACTION: actions})[ACTION]
         return actions, reward_output
 
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
         """Run the batch through the model and compute the loss for training or validation."""
-        batch = self.normalize_inputs(batch)
         if self.config.image_features:
             batch = dict(batch)
             batch[OBS_IMAGES] = [batch[key] for key in self.config.image_features]
 
-        batch = self.normalize_targets(batch)
         actions_hat, reward_output, (mu_hat, log_sigma_x2_hat) = self.model(batch)
 
         # Action loss - only compute for samples where use_action_mask is True
@@ -205,42 +187,34 @@ class RewACTPolicy(PreTrainedPolicy):
                 F.l1_loss(batch[ACTION], actions_hat, reduction="none") * ~batch["action_is_pad"].unsqueeze(-1)
             ).mean()
 
-        if reward_output is not None:
-            # Distributional value prediction loss - use cross-entropy
-            if "reward" in batch:
-                reward_targets = batch["reward"]  # (B, 1) - continuous values in [0, 1]
-                
-                # Convert continuous targets to bin indices
-                target_bins = self._value_to_bin(reward_targets)  # (B,) - discrete bin indices
-                
-                # Compute cross-entropy loss
-                reward_logits = reward_output['logits']  # (B, num_bins)
-                reward_loss = F.cross_entropy(
-                    reward_logits,      # (B, num_bins)
-                    target_bins,        # (B,)
-                    reduction='mean'
-                )
-            else:
-                reward_loss = torch.tensor(0.0, device=actions_hat.device)
-        else:
-            reward_loss = torch.tensor(0.0, device=actions_hat.device)
+        # Distributional value prediction loss - use cross-entropy
+        reward_targets = batch["reward"]  # (B, 1) - continuous values in [0, 1]
+        
+        # Convert continuous targets to bin indices
+        target_bins = self._value_to_bin(reward_targets)  # (B,) - discrete bin indices
+        
+        # Compute cross-entropy loss
+        reward_logits = reward_output['logits']  # (B, num_bins)
+        reward_loss = F.cross_entropy(
+            reward_logits,      # (B, num_bins)
+            target_bins,        # (B,)
+            reduction='mean'
+        )
 
         loss_dict = {
             "l1_loss": l1_loss.item(),
             "reward_loss": reward_loss.item() * self.config.reward_loss_weight,
         }
+
+        # Log expected value MSE for comparison with old approach
+        expected_values = reward_output['expected_value'].squeeze()
+        mse_for_logging = F.mse_loss(expected_values, reward_targets.squeeze())
+        loss_dict["reward_mse"] = mse_for_logging.item()
         
-        # Optionally log additional distributional metrics
-        if reward_output is not None and "reward" in batch:
-            # Log expected value MSE for comparison with old approach
-            expected_values = reward_output['expected_value'].squeeze()
-            mse_for_logging = F.mse_loss(expected_values, reward_targets.squeeze())
-            loss_dict["reward_mse"] = mse_for_logging.item()
-            
-            # Log entropy (measure of uncertainty)
-            reward_dist = reward_output['distribution']
-            entropy = -(reward_dist * torch.log(reward_dist + 1e-8)).sum(dim=-1).mean()
-            loss_dict["reward_entropy"] = entropy.item()
+        # Log entropy (measure of uncertainty)
+        reward_dist = reward_output['distribution']
+        entropy = -(reward_dist * torch.log(reward_dist + 1e-8)).sum(dim=-1).mean()
+        loss_dict["reward_entropy"] = entropy.item()
         
         if self.config.use_vae:
             mean_kld = (
@@ -412,25 +386,22 @@ class RewACT(nn.Module):
             latent dimension.
         """
         if self.config.use_vae and self.training:
-            assert "action" in batch, (
+            assert ACTION in batch, (
                 "actions must be provided when using the variational objective in training mode."
             )
 
-        if "observation.images" in batch:
-            batch_size = batch["observation.images"][0].shape[0]
-        else:
-            batch_size = batch["observation.environment_state"].shape[0]
+        batch_size = batch[OBS_IMAGES][0].shape[0] if OBS_IMAGES in batch else batch[OBS_ENV_STATE].shape[0]
 
         # Prepare the latent for input to the transformer encoder.
-        if self.config.use_vae and "action" in batch and self.training:
+        if self.config.use_vae and ACTION in batch and self.training:
             # Prepare the input to the VAE encoder: [cls, *joint_space_configuration, *action_sequence].
             cls_embed = einops.repeat(
                 self.vae_encoder_cls_embed.weight, "1 d -> b 1 d", b=batch_size
             )  # (B, 1, D)
             if self.config.robot_state_feature:
-                robot_state_embed = self.vae_encoder_robot_state_input_proj(batch["observation.state"])
+                robot_state_embed = self.vae_encoder_robot_state_input_proj(batch[OBS_STATE])
                 robot_state_embed = robot_state_embed.unsqueeze(1)  # (B, 1, D)
-            action_embed = self.vae_encoder_action_input_proj(batch["action"])  # (B, S, D)
+            action_embed = self.vae_encoder_action_input_proj(batch[ACTION])  # (B, S, D)
 
             if self.config.robot_state_feature:
                 vae_encoder_input = [cls_embed, robot_state_embed, action_embed]  # (B, S+2, D)
@@ -448,7 +419,7 @@ class RewACT(nn.Module):
             cls_joint_is_pad = torch.full(
                 (batch_size, 2 if self.config.robot_state_feature else 1),
                 False,
-                device=batch["observation.state"].device,
+                device=batch[OBS_STATE].device,
             )
             key_padding_mask = torch.cat(
                 [cls_joint_is_pad, batch["action_is_pad"]], axis=1
@@ -472,7 +443,7 @@ class RewACT(nn.Module):
             mu = log_sigma_x2 = None
             # TODO(rcadene, alexander-soare): remove call to `.to` to speedup forward ; precompute and use buffer
             latent_sample = torch.zeros([batch_size, self.config.latent_dim], dtype=torch.float32).to(
-                batch["observation.state"].device
+                batch[OBS_STATE].device
             )
 
         # Prepare transformer encoder inputs.
@@ -480,18 +451,18 @@ class RewACT(nn.Module):
         encoder_in_pos_embed = list(self.encoder_1d_feature_pos_embed.weight.unsqueeze(1))
         # Robot state token.
         if self.config.robot_state_feature:
-            encoder_in_tokens.append(self.encoder_robot_state_input_proj(batch["observation.state"]))
+            encoder_in_tokens.append(self.encoder_robot_state_input_proj(batch[OBS_STATE]))
         # Environment state token.
         if self.config.env_state_feature:
             encoder_in_tokens.append(
-                self.encoder_env_state_input_proj(batch["observation.environment_state"])
+                self.encoder_env_state_input_proj(batch[OBS_ENV_STATE])
             )
 
         if self.config.image_features:
             # For a list of images, the H and W may vary but H*W is constant.
             # NOTE: If modifying this section, verify on MPS devices that
             # gradients remain stable (no explosions or NaNs).
-            for img in batch["observation.images"]:
+            for img in batch[OBS_IMAGES]:
                 cam_features = self.backbone(img)["feature_map"]
                 cam_pos_embed = self.encoder_cam_feat_pos_embed(cam_features).to(dtype=cam_features.dtype)
                 cam_features = self.encoder_img_feat_input_proj(cam_features)

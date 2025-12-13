@@ -22,7 +22,8 @@ from robocandywrapper import WrappedRobotDataset
 from robocandywrapper.plugins import EpisodeOutcomePlugin
 
 from rewact.plugins import PiStar0_6CumulativeRewardPlugin
-from rewact.policy import RewACTPolicy  # Your value function model
+from rewact.policies.rewact import RewACTPolicy
+from rewact.policies.factory import make_pre_post_processors
 
 
 def smooth_values(values: list[float], window_size: int) -> list[float]:
@@ -97,6 +98,13 @@ def compute_advantages(
     value_model = RewACTPolicy.from_pretrained(value_model_path)
     value_model = value_model.to(device)
     value_model.eval()
+
+    preprocessor, postprocessor = make_pre_post_processors(
+        value_model.config,
+        pretrained_path=value_model_path,
+        dataset_stats=dataset.meta.stats,
+        plugin_features=wrapped_dataset.plugin_features,
+    )
     
     # Create output directory
     output_path = Path(output_dir)
@@ -132,6 +140,7 @@ def compute_advantages(
             # Get value prediction
             with torch.no_grad():
                 # Assuming your value function returns reward_output with 'expected_value'
+                batch = preprocessor(batch)
                 _, reward_output = value_model.select_action(batch)
                 value_model.reset()
                 value = reward_output.cpu().item()
