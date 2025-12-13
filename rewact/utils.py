@@ -9,7 +9,7 @@ from typing import Optional
 
 from glob import glob
 from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
-from lerobot.constants import PRETRAINED_MODEL_DIR
+from lerobot.utils.constants import PRETRAINED_MODEL_DIR
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.configs.types import FeatureType
@@ -17,8 +17,8 @@ from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
 from lerobot.datasets.utils import dataset_to_policy_features
 from termcolor import colored
 
-from rewact.policy import RewACTPolicy
-from rewact.actvantage_policy import ACTvantagePolicy
+from rewact.policies.rewact import RewACTPolicy
+from rewact.policies.actvantage import ACTvantagePolicy
 
 def cfg_to_group(cfg: TrainPipelineConfig, return_list: bool = False) -> list[str] | str:
     """Return a group name for logging. Optionally returns group name as list."""

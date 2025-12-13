@@ -10,13 +10,14 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from robocandywrapper import WrappedRobotDataset
+from robocandywrapper.dataformats.lerobot_21 import LeRobot21Dataset
 from robocandywrapper.plugins import EpisodeOutcomePlugin
 
 from rewact.plugins import PiStar0_6CumulativeRewardPlugin, ControlModePlugin
 from rewact.plugins.control_mode_plugin import CONTROL_MODE_HUMAN
-from rewact.policy import RewACTPolicy
+from rewact.policies.rewact import RewACTPolicy
+from rewact.policies.factory import make_pre_post_processors
 
 
 class AdvantageCalculator:
@@ -62,7 +63,7 @@ class AdvantageCalculator:
             Dictionary with computation results including output_path and statistics
         """
         logging.info(f"Loading dataset: {self.dataset_path}")
-        dataset = LeRobotDataset(self.dataset_path)
+        dataset = LeRobot21Dataset(self.dataset_path)
         wrapped_dataset = WrappedRobotDataset(
             datasets=[dataset],
             plugins=[EpisodeOutcomePlugin(), ControlModePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=False)],
@@ -76,6 +77,13 @@ class AdvantageCalculator:
         value_model = RewACTPolicy.from_pretrained(self.value_model_path)
         value_model = value_model.to(self.device)
         value_model.eval()
+
+        preprocessor, postprocessor = make_pre_post_processors(
+            value_model.config,
+            pretrained_path=self.value_model_path,
+            dataset_stats=dataset.meta.stats,
+            plugin_features=wrapped_dataset.plugin_features,
+        )
 
         # Create dataloader for batched inference (no shuffling to maintain order)
         dataloader = torch.utils.data.DataLoader(
@@ -103,6 +111,7 @@ class AdvantageCalculator:
                 batch_device = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
                                for k, v in batch.items()}
                 
+                batch_device = preprocessor(batch_device)
                 # Get value predictions for the batch
                 _, reward_output = value_model.predict_action_chunk(batch_device)
                 
