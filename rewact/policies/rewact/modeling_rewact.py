@@ -155,6 +155,14 @@ class RewACTPolicy(PreTrainedPolicy):
 
         return self._action_queue.popleft(), current_reward_pred
 
+
+    def get_reward_pred(self, batch: dict[str, Tensor]) -> Tensor:
+        """Get the reward prediction for the current batch."""
+        _, reward_output = self.predict_action_chunk(batch)
+        current_reward_pred = reward_output['expected_value'][0, 0]
+        current_reward_pred = torch.clamp(current_reward_pred, 0.0, 1.0)
+        return current_reward_pred
+
     @torch.no_grad()
     def predict_action_chunk(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
         """Predict a chunk of actions given environment observations."""
@@ -175,17 +183,21 @@ class RewACTPolicy(PreTrainedPolicy):
 
         actions_hat, reward_output, (mu_hat, log_sigma_x2_hat) = self.model(batch)
 
+        # For action loss, we calculate a combined mask using the use_action_mask and action_is_pad, episode_outcome, as well as control_mode != "policy"
+        # action_is_pad and use_action_mask have shape (B, chunk_size), episode_outcome and control_mode have shape (B,)
+        # We need to expand all to (B, chunk_size, 1) for proper broadcasting with action predictions
+        action_mask = (~batch["action_is_pad"].unsqueeze(-1)) & batch["use_action_mask"].unsqueeze(-1).unsqueeze(-1)
+        # if "episode_outcome" in batch:
+        #     # Expand (B,) -> (B, 1, 1) to broadcast across chunk_size dimension
+        #     action_mask = action_mask & (batch["episode_outcome"].unsqueeze(-1).unsqueeze(-1))
+        if "control_mode_autonomous" in batch:
+            # Expand (B,) -> (B, 1, 1) to broadcast across chunk_size dimension
+            action_mask = action_mask & (~batch["control_mode_autonomous"].squeeze().unsqueeze(-1).unsqueeze(-1))
+
         # Action loss - only compute for samples where use_action_mask is True
-        if "use_action_mask" in batch:
-            action_mask = batch["use_action_mask"].unsqueeze(-1).unsqueeze(-1)
-            combined_mask = (~batch["action_is_pad"].unsqueeze(-1)) & action_mask
-            l1_loss = (
-                F.l1_loss(batch[ACTION], actions_hat, reduction="none") * combined_mask
-            ).mean()
-        else:
-            l1_loss = (
-                F.l1_loss(batch[ACTION], actions_hat, reduction="none") * ~batch["action_is_pad"].unsqueeze(-1)
-            ).mean()
+        # Compute mean only over valid (non-masked) elements to avoid under-estimating the loss
+        masked_l1_loss = F.l1_loss(batch[ACTION], actions_hat, reduction="none") * action_mask
+        l1_loss = masked_l1_loss.sum() / (action_mask.sum() + 1e-8)  # Add epsilon to avoid division by zero
 
         # Distributional value prediction loss - use cross-entropy
         reward_targets = batch["reward"]  # (B, 1) - continuous values in [0, 1]

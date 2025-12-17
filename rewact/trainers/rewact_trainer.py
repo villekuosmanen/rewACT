@@ -156,6 +156,17 @@ class RewACTTrainer:
         dataset = make_dataset(
             cfg, plugins=[EpisodeOutcomePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True)]
         )
+        import numpy as np
+        dataset.meta.features['observation.eef_6d_pose']= {
+            'dtype': "float32",
+            'shape': (7,),
+        }
+        # Update stats to match the new shape by appending the last element from observation.state
+        for stat_key in ['min', 'max', 'mean', 'std']:
+            dataset.meta.stats['observation.eef_6d_pose'][stat_key] = np.concatenate([
+                dataset.meta.stats['observation.eef_6d_pose'][stat_key],
+                dataset.meta.stats['observation.state'][stat_key][-1:]
+            ])
 
         logging.info("Creating policy")
         policy = make_rewact_policy(cfg.policy, dataset.meta)

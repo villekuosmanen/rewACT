@@ -35,6 +35,8 @@ from lerobot.policies.act.modeling_act import (
 
 from rewact.policies.actvantage.configuration_actvantage import ACTvantageConfig
 
+# OBS_STATE_KEY = "observation.eef_6d_pose"
+OBS_STATE_KEY = OBS_STATE
 
 class ACTvantagePolicy(PreTrainedPolicy):
     """
@@ -322,7 +324,7 @@ class ACTvantage(nn.Module):
                 self.vae_encoder_cls_embed.weight, "1 d -> b 1 d", b=batch_size
             )  # (B, 1, D)
             if self.config.robot_state_feature:
-                robot_state_embed = self.vae_encoder_robot_state_input_proj(batch[OBS_STATE])
+                robot_state_embed = self.vae_encoder_robot_state_input_proj(batch[OBS_STATE_KEY])
                 robot_state_embed = robot_state_embed.unsqueeze(1)  # (B, 1, D)
             action_embed = self.vae_encoder_action_input_proj(batch[ACTION])  # (B, S, D)
 
@@ -342,7 +344,7 @@ class ACTvantage(nn.Module):
             cls_joint_is_pad = torch.full(
                 (batch_size, 2 if self.config.robot_state_feature else 1),
                 False,
-                device=batch[OBS_STATE].device,
+                device=batch[OBS_STATE_KEY].device,
             )
             key_padding_mask = torch.cat(
                 [cls_joint_is_pad, batch["action_is_pad"]], axis=1
@@ -366,7 +368,7 @@ class ACTvantage(nn.Module):
             mu = log_sigma_x2 = None
             # TODO(rcadene, alexander-soare): remove call to `.to` to speedup forward ; precompute and use buffer
             latent_sample = torch.zeros([batch_size, self.config.latent_dim], dtype=torch.float32).to(
-                batch[OBS_STATE].device
+                batch[OBS_STATE_KEY].device
             )
 
         # Prepare transformer encoder inputs.
@@ -389,7 +391,7 @@ class ACTvantage(nn.Module):
 
         # Robot state token.
         if self.config.robot_state_feature:
-            encoder_in_tokens.append(self.encoder_robot_state_input_proj(batch[OBS_STATE]))
+            encoder_in_tokens.append(self.encoder_robot_state_input_proj(batch[OBS_STATE_KEY]))
         # Environment state token.
         if self.config.env_state_feature:
             encoder_in_tokens.append(

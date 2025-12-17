@@ -63,7 +63,7 @@ class ControlModePluginInstance(PluginInstance):
     
     def get_data_keys(self) -> list[str]:
         """Return the keys this plugin will add to items."""
-        return ["control_mode"]
+        return ["control_mode", "control_mode_autonomous"]
     
     def _get_episode_data_index_pos(self, episode_idx: int) -> int:
         """
@@ -106,7 +106,8 @@ class ControlModePluginInstance(PluginInstance):
         control_mode = self._get_control_mode(episode_idx, frame_index_in_episode)
         
         return {
-            "control_mode": control_mode
+            "control_mode": control_mode,
+            "control_mode_autonomous": torch.tensor([control_mode == CONTROL_MODE_POLICY], dtype=torch.bool)
         }
     
     def _get_control_mode(self, episode_idx: int, frame_index_in_episode: int) -> str:

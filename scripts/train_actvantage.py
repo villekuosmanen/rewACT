@@ -139,6 +139,8 @@ def train(cfg: TrainPipelineConfig):
         "villekuosmanen/dAgger_build_block_tower_1.0.0": Path("outputs/dAgger_build_block_tower_1.0.0-advantages"),
         "villekuosmanen/dAgger_build_block_tower_1.1.0": Path("outputs/dAgger_build_block_tower_1.1.0-advantages"),
         "villekuosmanen/dAgger_build_block_tower_1.2.0": Path("outputs/dAgger_build_block_tower_1.2.0-advantages"),
+        "villekuosmanen/dAgger_build_block_tower_1.3.0": Path("outputs/dAgger_build_block_tower_1.3.0-advantages"),
+        "villekuosmanen/dAgger_build_block_tower_1.4.0": Path("outputs/dAgger_build_block_tower_1.4.0-advantages"),
     }
     
     # Validate all directories exist
@@ -153,9 +155,20 @@ def train(cfg: TrainPipelineConfig):
     advantage_plugin = PiStar0_6AdvantagePlugin(
         advantage_file=advantage_dirs,  # Now accepts dict for multiple datasets
         use_percentile_threshold=True,
-        percentile=50.0,  # Can be configured
+        percentile=55.0,  # Can be configured
     )
     dataset = make_dataset(cfg, plugins=[EpisodeOutcomePlugin(), ControlModePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True), advantage_plugin])
+    import numpy as np
+    dataset.meta.features['observation.eef_6d_pose']= {
+        'dtype': "float32",
+        'shape': (7,),
+    }
+    # Update stats to match the new shape by appending the last element from observation.state
+    for stat_key in ['min', 'max', 'mean', 'std']:
+        dataset.meta.stats['observation.eef_6d_pose'][stat_key] = np.concatenate([
+            dataset.meta.stats['observation.eef_6d_pose'][stat_key],
+            dataset.meta.stats['observation.state'][stat_key][-1:]
+        ])
 
     logging.info("Creating policy")    
     policy = make_actvantage_policy(cfg.policy, dataset.meta)
