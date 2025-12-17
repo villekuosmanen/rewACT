@@ -25,7 +25,7 @@ from datetime import datetime
 
 import modal
 
-TRAIN_VERSION = "1.3.0"
+TRAIN_VERSION = "1.5.0"
 
 # Define the Modal app
 app = modal.App("rewact-training-pipeline")
@@ -177,6 +177,8 @@ def train_value_function(
         "--log_freq=20",
         f"--save_freq={save_freq}",
         f"--steps={steps}",
+        "--policy.n_action_steps=50",
+        "--policy.n_decoder_layers=4",
         "--wandb.enable=true",
         "--policy.push_to_hub=true",
     ]
@@ -603,7 +605,7 @@ async def orchestrate_pipeline(
 def main(
     
     # Dataset configuration
-    datasets: str = "villekuosmanen/build_block_tower, villekuosmanen/dAgger_build_block_tower_1.0.0, villekuosmanen/dAgger_build_block_tower_1.1.0, villekuosmanen/dAgger_build_block_tower_1.2.0",
+    datasets: str = "villekuosmanen/build_block_tower, villekuosmanen/dAgger_build_block_tower_1.0.0, villekuosmanen/dAgger_build_block_tower_1.1.0, villekuosmanen/dAgger_build_block_tower_1.2.0, villekuosmanen/dAgger_build_block_tower_1.3.0, villekuosmanen/dAgger_build_block_tower_1.4.0",
     
     # Output configuration
     value_function_repo: str = f"villekuosmanen/rewact_build_block_tower_{TRAIN_VERSION}",
@@ -614,16 +616,16 @@ def main(
     policy_job_name: str = f"actvantage_build_block_tower_{TRAIN_VERSION}",
     
     # Training hyperparameters
-    value_steps: int = 100,
-    policy_steps: int = 50000,
+    value_steps: int = 35000,
+    policy_steps: int = 35000,
     batch_size: int = 64,
     n_step_advantage: int = 50,
-    advantage_percentile: float = 30.0,
+    advantage_percentile: float = 55.0,
     
     # Pipeline control
     skip_value_training: bool = True,
-    skip_advantage_computation: bool = True,
-    skip_policy_training: bool = False,
+    skip_advantage_computation: bool = False,
+    skip_policy_training: bool = True,
     
     # Checkpoint configuration
     checkpoint_push_freq: int = 2000,

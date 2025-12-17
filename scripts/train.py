@@ -19,6 +19,7 @@ from contextlib import nullcontext
 from pprint import pformat
 from typing import Any
 
+import numpy as np
 import torch
 from termcolor import colored
 from torch.amp import GradScaler
@@ -50,7 +51,7 @@ from robocandywrapper.plugins import EpisodeOutcomePlugin
 from robocandywrapper.samplers import load_sampler_config
 from robocandywrapper import make_dataset
 
-from rewact.plugins import PiStar0_6CumulativeRewardPlugin
+from rewact.plugins import PiStar0_6CumulativeRewardPlugin, ControlModePlugin
 from rewact.utils import make_rewact_policy
 from rewact.policies.factory import make_pre_post_processors
 
@@ -132,7 +133,17 @@ def train(cfg: TrainPipelineConfig):
     torch.backends.cuda.matmul.allow_tf32 = True
 
     logging.info("Creating dataset")
-    dataset = make_dataset(cfg, plugins=[EpisodeOutcomePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True)])
+    dataset = make_dataset(cfg, plugins=[EpisodeOutcomePlugin(), ControlModePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True)])
+    dataset.meta.features['observation.eef_6d_pose']= {
+        'dtype': "float32",
+        'shape': (7,),
+    }
+    # Update stats to match the new shape by appending the last element from observation.state
+    for stat_key in ['min', 'max', 'mean', 'std']:
+        dataset.meta.stats['observation.eef_6d_pose'][stat_key] = np.concatenate([
+            dataset.meta.stats['observation.eef_6d_pose'][stat_key],
+            dataset.meta.stats['observation.state'][stat_key][-1:]
+        ])
 
     logging.info("Creating policy")
     policy = make_rewact_policy(cfg.policy, dataset.meta)
