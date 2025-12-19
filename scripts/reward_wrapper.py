@@ -125,7 +125,8 @@ def create_reward_visualization_video(
     output_path: str = "reward_visualization.mp4",
     fps: int = 20,
     image_size: Tuple[int, int] = (640, 480),
-    graph_height: int = 200
+    graph_height: int = 200,
+    text: str = "Current Reward",
 ) -> str:
     """
     Create a video showing images with reward line graph below.
@@ -154,7 +155,7 @@ def create_reward_visualization_video(
         # Generate frames
         for step_idx, (images, reward_info) in enumerate(zip(images_list, reward_data)):
             frame_path = temp_path / f"frame_{step_idx:06d}.png"
-            create_reward_frame(images, reward_info, reward_data, frame_path, image_size, graph_height)
+            create_reward_frame(images, reward_info, reward_data, frame_path, image_size, graph_height, text)
         
         # Create video using ffmpeg
         create_video_from_frames(temp_path, output_path, fps)
@@ -169,7 +170,8 @@ def create_reward_frame(
     all_reward_data: List[Dict],
     output_path: Path,
     image_size: Tuple[int, int],
-    graph_height: int
+    graph_height: int,
+    text: str = "Current Reward"
 ):
     """Create a single reward visualization frame with images and reward graph"""
     # Configuration
@@ -294,7 +296,7 @@ def create_reward_frame(
         cv2.line(canvas, (margin, y_pos), (canvas_width - margin, y_pos), (100, 100, 100), 1)
     
     # Current reward display
-    reward_text = f'Current Reward: {current_reward:.3f}'
+    reward_text = f'{text}: {current_reward:.3f}'
     text_size = cv2.getTextSize(reward_text, font, font_scale * 1.2, font_thickness + 1)[0]
     text_x = (canvas_width - text_size[0]) // 2
     text_y = graph_y + graph_height - 10
@@ -541,7 +543,7 @@ def create_advantage_frame(
     
     # Current advantage display
     is_positive = current_advantage > threshold
-    adv_text = f'[REDACTED]: {current_advantage:+.3f} ({"POSITIVE" if is_positive else "NEGATIVE"})'
+    adv_text = f'Advantage: {current_advantage:+.3f} ({"POSITIVE" if is_positive else "NEGATIVE"})'
     text_color = (0, 255, 0) if is_positive else (0, 0, 255)
     text_size = cv2.getTextSize(adv_text, font, font_scale * 1.2, font_thickness + 1)[0]
     text_x = (canvas_width - text_size[0]) // 2
