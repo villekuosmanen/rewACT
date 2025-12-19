@@ -224,7 +224,7 @@ def analyze_episode(
         
     if lowest_bin_data and reward_images:
         output_filename = f"outputs/lowest_bin_visualization.mp4"
-        create_reward_visualization_video(reward_images, lowest_bin_data, output_filename, fps=dataset.fps)
+        create_reward_visualization_video(reward_images, lowest_bin_data, output_filename, fps=dataset.fps, text="Failure Probability")
         
         # Print statistics for lowest bin probabilities
         probs = [r['reward'] for r in lowest_bin_data]
