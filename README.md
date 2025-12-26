@@ -8,6 +8,48 @@ A PyTorch implementation of RewACT, extending the ACT (Action Chunking with Tran
 
 You can also install the package in editable mode by cloning the repository and using `pip install -e .`.
 
+## DINOv3 vision backbones (optional)
+
+RewACT can swap the vision frontend between the default torchvision ResNet feature-map pipeline and **DINOv3** backbones (ViT and ConvNeXt).
+
+### Install DINOv3 (local repo)
+
+DINOv3 requires **Python >= 3.11**. After activating your env:
+
+```
+cd /path/to/dinov3
+pip install -e .
+```
+
+### Enable DINOv3 in training
+
+Use these policy flags (example: **ViT-B/16**):
+
+```
+--policy.vision_encoder_type=dinov3 \
+--policy.dinov3_variant=vitb16 \
+--policy.dinov3_weights=/ABS/PATH/TO/dinov3_vitb16_pretrain_*.pth
+```
+
+Supported `dinov3_variant` values:
+- `vitb16`
+- `vitl16`
+- `convnext_base`
+- `convnext_large`
+
+Note: `freeze_vision_encoder` defaults to `True`. To finetune the vision backbone, set `--policy.freeze_vision_encoder=false`.
+
+### Smoke test (token shapes)
+
+```
+python scripts/smoke_test_vision_encoders.py \
+  --dinov3-variant vitb16 \
+  --dinov3-weights /ABS/PATH/TO/dinov3_vitb16_pretrain_*.pth \
+  --h 480 --w 640 --num-cameras 2 --batch-size 2
+```
+
+Tip: ViT patch tokens scale as \((H/16)\times(W/16)\). ConvNeXt variants usually produce far fewer tokens at the same resolution, so they’re often easier to train at 480×640.
+
 ## Quick Start
 
 ### Train a RewACT policy
@@ -29,6 +71,26 @@ python scripts/train.py \
 --steps=10000
 ```
 
+To use a DINOv3 vision backbone, add these flags (example shown with placeholders):
+
+```
+python scripts/train.py \
+--dataset.repo_id=danaaubakirova/so100_task_2 \
+--dataset.episodes=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19] \
+--policy.type=rewact \
+--policy.repo_id=<YOUR_HF_REPO_ID> \
+--output_dir=outputs/train/<RUN_NAME> \
+--job_name=<RUN_NAME> \
+--batch_size=1 \
+--eval_freq=-1 \
+--log_freq=50 \
+--save_freq=500 \
+--steps=1000 \
+--policy.vision_encoder_type=dinov3 \
+--policy.dinov3_variant=<vitb16|vitl16|convnext_base|convnext_large> \
+--policy.dinov3_weights=/ABS/PATH/TO/<dinov3_checkpoint>.pth
+```
+
 ### Evaluating the trained RewACT policy
 
 To avoid overfitting, I highly recommend evaluating the trained policy using a validation or test dataset in the same training distribution.
@@ -39,6 +101,8 @@ python scripts/visualise_reward_predictions.py \
 --episode-id 24 \
 --policy-path "outputs/train/so100_test/checkpoints/last/pretrained_model"
 ```
+
+Note: `scripts/visualise_reward_predictions.py` currently writes to `outputs/reward_visualization.mp4` and will overwrite it between runs (rename/move it if you want to keep multiple outputs).
 
 ## What is a reward model?
 
