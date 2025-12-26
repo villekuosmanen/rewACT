@@ -41,6 +41,8 @@ Note: `freeze_vision_encoder` defaults to `True`. To finetune the vision backbon
 
 ### Smoke test (token shapes)
 
+The smoke test instantiates the vision encoder and prints the **number of image tokens** produced per camera at a given resolution. This is useful because self-attention cost scales roughly quadratically with sequence length (about O(S^2) in the number of tokens S), and token count can vary a lot across backbones.
+
 ```
 python scripts/smoke_test_vision_encoders.py \
   --dinov3-variant vitb16 \
@@ -48,7 +50,11 @@ python scripts/smoke_test_vision_encoders.py \
   --h 480 --w 640 --num-cameras 2 --batch-size 2
 ```
 
-Tip: ViT patch tokens scale as \((H/16)\times(W/16)\). ConvNeXt variants usually produce far fewer tokens at the same resolution, so they’re often easier to train at 480×640.
+Tip: token count is roughly:
+- ViT-*/16: (H/16) * (W/16)
+- ConvNeXt (DINOv3): typically (H/32) * (W/32) (effective stride ~32)
+
+So at 480x640, ViT/16 gives 30*40=1200 tokens per camera, while ConvNeXt gives 15*20=300 tokens per camera (about 4x fewer tokens).
 
 ## Quick Start
 
