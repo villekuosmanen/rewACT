@@ -177,19 +177,13 @@ class RewACTPolicy(PreTrainedPolicy):
             F.l1_loss(batch[ACTION], actions_hat, reduction="none") * ~batch["action_is_pad"].unsqueeze(-1)
         ).mean()
 
-        if self.config.use_reward_head and reward_hat is not None:
-            # Reward prediction loss - use MSE for continuous values
-            if "reward" in batch:
-                reward_targets = batch["reward"]  # (B, 1) - current reward only
-                # Clamp predictions to [0, 1] range for loss computation
-                reward_preds_clamped = torch.clamp(reward_hat.squeeze(), 0.0, 1.0)
-                reward_loss = F.mse_loss(
-                    reward_preds_clamped,  # (batch_size, 1) - clamped to [0, 1]
-                    reward_targets,  # (batch_size, 1)
-                    reduction="mean"
-                )
-            else:
-                reward_loss = torch.tensor(0.0, device=actions_hat.device)
+        reward_loss = torch.tensor(0.0, device=actions_hat.device)
+        if self.config.use_reward_head and reward_hat is not None and "reward" in batch:
+            # Reward prediction loss - use MSE for continuous values.
+            # reward_hat is (B, 1, 1). Index to preserve batch dimension (avoid `.squeeze()` broadcasting issues).
+            reward_targets = batch["reward"].view(-1)  # (B,)
+            reward_preds_clamped = torch.clamp(reward_hat[:, 0, 0], 0.0, 1.0)  # (B,)
+            reward_loss = F.mse_loss(reward_preds_clamped, reward_targets, reduction="mean") 
 
         loss_dict = {
             "l1_loss": l1_loss.item(),
@@ -206,7 +200,7 @@ class RewACTPolicy(PreTrainedPolicy):
             loss_dict["kld_loss"] = mean_kld.item()
             loss = l1_loss + self.config.reward_loss_weight * reward_loss + mean_kld * self.config.kl_weight
         else:
-            loss = l1_loss
+            loss = l1_loss + self.config.reward_loss_weight * reward_loss
 
         return loss, loss_dict
 

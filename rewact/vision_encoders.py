@@ -76,7 +76,7 @@ class DinoV3VisionEncoder(VisionEncoder):
         num_cameras: int,
         variant: str = "vitl16",
         weights: str,
-        patch_size: int = 16,
+        vit_patch_size: int = 16,
         # Learned patch-pos is stored as a small base grid and interpolated to runtime Hp×Wp.
         pos_base_hw: tuple[int, int] = (30, 40),
     ) -> None:
@@ -88,15 +88,28 @@ class DinoV3VisionEncoder(VisionEncoder):
 
         # Lazy import so ResNet users don't need dinov3 installed.
         try:
-            from dinov3.hub.backbones import Weights as DinoHubWeights
-            from dinov3.hub.backbones import dinov3_vitl16
+            from dinov3.hub.backbones import (
+                dinov3_convnext_base,
+                dinov3_convnext_large,
+                dinov3_vitb16,
+                dinov3_vitl16,
+            )
         except Exception as e:  # pragma: no cover
             raise ImportError(
                 "DINOv3 is not available. Install the local repo, e.g. `pip install -e /home/user/Desktop/code/dinov3`."
             ) from e
 
-        if variant != "vitl16":
-            raise ValueError(f"Only variant='vitl16' is supported in v1. Got {variant}.")
+        variant_to_ctor = {
+            "vitb16": (dinov3_vitb16, "vit"),
+            "vitl16": (dinov3_vitl16, "vit"),
+            "convnext_base": (dinov3_convnext_base, "convnext"),
+            "convnext_large": (dinov3_convnext_large, "convnext"),
+        }
+        if variant not in variant_to_ctor:
+            raise ValueError(f"Unsupported DINOv3 variant: {variant}. Supported: {sorted(variant_to_ctor.keys())}")
+        ctor, grid_kind = variant_to_ctor[variant]
+        self.variant = variant
+        self.grid_kind = grid_kind
 
         if not isinstance(weights, str) or len(weights) == 0:
             raise ValueError("dinov3_weights must be a non-empty local checkpoint path.")
@@ -105,10 +118,10 @@ class DinoV3VisionEncoder(VisionEncoder):
 
         # Note: DINOv3 hub loader returns a DinoVisionTransformer. `forward_features(x)` returns a dict
         # with `x_norm_patchtokens: (B, N_patches, embed_dim)`.
-        self.dinov3_model = dinov3_vitl16(pretrained=True, weights=weights)
+        self.dinov3_model = ctor(pretrained=True, weights=weights)
 
-        # Sanity: keep track of patch size (hub model also has `patch_size` attribute).
-        self.patch_size = patch_size
+        # For ViT variants only.
+        self.vit_patch_size = int(vit_patch_size)
 
         # Project DINO embed_dim -> ACT dim_model.
         embed_dim = getattr(self.dinov3_model, "embed_dim", None)
@@ -139,14 +152,34 @@ class DinoV3VisionEncoder(VisionEncoder):
         pos = pos + cam  # broadcast cam over patches
         return pos.contiguous()
 
+    @staticmethod
+    def _infer_hw_from_seq_len(n_tokens: int, *, h: int, w: int) -> tuple[int, int]:
+        """Infer (Hp, Wp) such that Hp*Wp == n_tokens and Hp/Wp ~= h/w.
+
+        This is used for non-ViT backbones (e.g. ConvNeXt) where token grids come from strided feature maps
+        and exact output sizes can depend on conv padding/stride details.
+        """
+        if n_tokens <= 0:
+            raise ValueError(f"n_tokens must be positive. Got {n_tokens}.")
+        # Find factor pair closest to aspect ratio.
+        target_ratio = float(h) / float(w)
+        best = (1, n_tokens)
+        best_err = float("inf")
+        # Iterate over divisors up to sqrt(n_tokens).
+        r = int(n_tokens**0.5)
+        for hp in range(1, r + 1):
+            if n_tokens % hp != 0:
+                continue
+            wp = n_tokens // hp
+            err = abs((hp / wp) - target_ratio)
+            if err < best_err:
+                best_err = err
+                best = (hp, wp)
+        return best
+
     def forward(self, img: Tensor, *, cam_idx: int = 0) -> tuple[Tensor, Tensor]:
         if not (0 <= cam_idx < self.num_cameras):
             raise ValueError(f"cam_idx out of range. Got {cam_idx} with num_cameras={self.num_cameras}.")
-
-        _, _, h, w = img.shape
-        # DINO patch embed expects dimensions divisible by patch size in most setups.
-        hp = h // self.patch_size
-        wp = w // self.patch_size
 
         out = self.dinov3_model.forward_features(img)
         if "x_norm_patchtokens" not in out:  # pragma: no cover
@@ -155,6 +188,14 @@ class DinoV3VisionEncoder(VisionEncoder):
 
         tokens = self.proj(patch_tokens)  # (B, N, D)
         tokens = tokens.transpose(0, 1).contiguous()  # (N, B, D)
+
+        # Determine a 2D token grid (Hp, Wp) for learned positional embeddings.
+        _, _, h, w = img.shape
+        if self.grid_kind == "vit":
+            hp = h // self.vit_patch_size
+            wp = w // self.vit_patch_size
+        else:
+            hp, wp = self._infer_hw_from_seq_len(tokens.shape[0], h=h, w=w)
 
         pos_tokens = self._make_pos_tokens(
             hp=hp,
@@ -168,13 +209,13 @@ class DinoV3VisionEncoder(VisionEncoder):
         if tokens.shape[0] != pos_tokens.shape[0]:  # pragma: no cover
             raise RuntimeError(
                 f"DINO tokens length mismatch. Got N={tokens.shape[0]} but Hp*Wp={pos_tokens.shape[0]} "
-                f"(Hp={hp}, Wp={wp}, patch_size={self.patch_size})."
+                f"(Hp={hp}, Wp={wp}, variant={self.variant})."
             )
 
         return tokens, pos_tokens
 
 
-def _infer_dinov3_pos_base_hw(config, *, patch_size: int) -> tuple[int, int]:
+def _infer_dinov3_pos_base_hw(config, *, variant: str, vit_patch_size: int) -> tuple[int, int]:
     """Infer a sensible base grid (Hp, Wp) from configured image shapes. """
     img_feats = getattr(config, "image_features", None)
     if isinstance(img_feats, dict) and len(img_feats) > 0:
@@ -184,7 +225,10 @@ def _infer_dinov3_pos_base_hw(config, *, patch_size: int) -> tuple[int, int]:
             # Common: (3, H, W)
             h = int(shape[-2])
             w = int(shape[-1])
-            return max(1, h // patch_size), max(1, w // patch_size)
+            if variant.startswith("convnext"):
+                # ConvNeXt has an effective stride of 32 (4 then 2×2×2).
+                return max(1, h // 32), max(1, w // 32)
+            return max(1, h // vit_patch_size), max(1, w // vit_patch_size)
     # Fallback that works well for 480×640 with patch=16 (30×40).
     return (30, 40)
 
@@ -208,17 +252,18 @@ def make_vision_encoder(config) -> VisionEncoder:
     elif vision_type == "dinov3":
         img_feats = getattr(config, "image_features", [])
         num_cameras = len(img_feats)
-        patch_size = int(getattr(config, "dinov3_patch_size", 16))
+        vit_patch_size = int(getattr(config, "dinov3_patch_size", 16))
         weights = getattr(config, "dinov3_weights", None)
         if weights is None:
             raise ValueError("vision_encoder_type='dinov3' requires config.dinov3_weights (local checkpoint path).")
+        variant = str(getattr(config, "dinov3_variant", "vitl16"))
         enc = DinoV3VisionEncoder(
             dim_model=int(config.dim_model),
             num_cameras=num_cameras,
-            variant=str(getattr(config, "dinov3_variant", "vitl16")),
+            variant=variant,
             weights=str(weights),
-            patch_size=patch_size,
-            pos_base_hw=_infer_dinov3_pos_base_hw(config, patch_size=patch_size),
+            vit_patch_size=vit_patch_size,
+            pos_base_hw=_infer_dinov3_pos_base_hw(config, variant=variant, vit_patch_size=vit_patch_size),
         )
     else:
         raise ValueError(f"Unknown vision_encoder_type: {vision_type}")
