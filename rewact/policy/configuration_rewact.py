@@ -24,3 +24,17 @@ class RewACTConfig(ACTConfig):
     # Reward prediction head
     use_reward_head: bool = True
     reward_loss_weight: float = 2.0
+
+    # Vision encoder abstraction.
+    # - "resnet": torchvision resnet -> feature map -> flatten tokens (current behavior)
+    # - "dinov3": dinov3 ViT-L/16 -> patch tokens
+    vision_encoder_type: str = "resnet"
+    freeze_vision_encoder: bool = True
+
+    # DINOv3-specific.
+    dinov3_variant: str = "vitl16"
+    # Path to a local DINOv3 checkpoint.
+    dinov3_weights: str | None = None
+    dinov3_patch_size: int = 16
+    # Placeholder for future (not wired yet):
+    dinov3_preprocess: str = "none"
