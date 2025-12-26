@@ -51,10 +51,10 @@ python scripts/smoke_test_vision_encoders.py \
 ```
 
 Tip: token count is roughly:
-- ViT-*/16: (H/16) * (W/16)
-- ConvNeXt (DINOv3): typically (H/32) * (W/32) (effective stride ~32)
+- **ViT (patch=16)**: (H/16) * (W/16)
+- **ConvNeXt (DINOv3)**: typically (H/32) * (W/32) (effective stride ~32)
 
-So at 480x640, ViT/16 gives 30*40=1200 tokens per camera, while ConvNeXt gives 15*20=300 tokens per camera (about 4x fewer tokens).
+So at 480x640, ViT/16 gives 30 * 40 = 1200 tokens per camera, while ConvNeXt gives 15 * 20 = 300 tokens per camera (about 4x fewer tokens).
 
 ## Quick Start
 
