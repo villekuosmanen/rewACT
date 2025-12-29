@@ -13,9 +13,36 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+"""
+RewACT Training Script - Train reward-augmented ACT policies on LeRobot datasets.
+
+Quickstart:
+    python scripts/train.py \
+        --dataset.repo_id=danaaubakirova/so100_task_2 \
+        --dataset.episodes=[0,1,2,3,4,5,6,7,8,9] \
+        --policy.type=rewact \
+        --policy.repo_id=your-hf-user/so100_rewact_resnet \
+        --batch_size=8 --steps=1000 --save_freq=500
+
+With DINOv3 backbone:
+    python scripts/train.py \
+        --dataset.repo_id=danaaubakirova/so100_task_2 \
+        --policy.type=rewact \
+        --policy.repo_id=your-hf-user/so100_rewact_dinov3 \
+        --batch_size=1 --steps=1000 --save_freq=500 \
+        --policy.vision_encoder_type=dinov3 \
+        --policy.dinov3_variant=vitb16 \
+        --policy.dinov3_weights=/path/to/dinov3_vitb16.pth
+
+job_name and output_dir default to the model name from policy.repo_id.
+See README.md for all options.
+"""
+
 import logging
 import time
 from contextlib import nullcontext
+from pathlib import Path
 from pprint import pformat
 from typing import Any
 
@@ -53,6 +80,49 @@ from lerobot.utils.wandb_utils import WandBLogger
 
 from rewact import LeRobotDatasetWithReward
 from rewact.utils import make_rewact_policy
+
+
+def _check_hf_write_access(repo_id: str) -> None:
+    """Check if we have write access to the HuggingFace repo before training."""
+    from huggingface_hub import HfApi
+    from huggingface_hub.utils import HfHubHTTPError
+    
+    if not repo_id:
+        return
+    
+    api = HfApi()
+    try:
+        # Check if user is logged in
+        user_info = api.whoami()
+        username = user_info.get("name", "")
+    except Exception:
+        raise RuntimeError(
+            "Not logged in to HuggingFace. Run `huggingface-cli login` first."
+        )
+    
+    repo_owner = repo_id.split("/")[0]
+    
+    # Check if repo exists and we have write access
+    try:
+        repo_info = api.repo_info(repo_id, repo_type="model")
+        # Repo exists - check if we can write to it
+        # If we own it or are a collaborator, we're good
+        logging.info(f"HuggingFace repo '{repo_id}' exists and is accessible.")
+    except HfHubHTTPError as e:
+        if e.response.status_code == 404:
+            # Repo doesn't exist - check if we can create it
+            if repo_owner != username:
+                # Check if it's an org we belong to
+                orgs = [org.get("name", "") for org in user_info.get("orgs", [])]
+                if repo_owner not in orgs:
+                    raise RuntimeError(
+                        f"Cannot create repo '{repo_id}': you are logged in as '{username}' "
+                        f"but the repo owner '{repo_owner}' is not you or an org you belong to."
+                    )
+            logging.info(f"HuggingFace repo '{repo_id}' will be created on push.")
+        else:
+            raise RuntimeError(f"Cannot access HuggingFace repo '{repo_id}': {e}")
+
 
 def update_policy(
     train_metrics: MetricsTracker,
@@ -108,6 +178,18 @@ def update_policy(
 
 @parser.wrap()
 def train(cfg: TrainPipelineConfig):
+    # Default job_name and output_dir from policy.repo_id if not set
+    if hasattr(cfg.policy, 'repo_id') and cfg.policy.repo_id:
+        run_name = cfg.policy.repo_id.split('/')[-1]
+        if not cfg.job_name:
+            cfg.job_name = run_name
+        if not cfg.output_dir:
+            cfg.output_dir = Path(f"outputs/train/{run_name}")
+    
+    # Early check for HuggingFace write access when repo_id is provided
+    if hasattr(cfg.policy, 'repo_id') and cfg.policy.repo_id:
+        _check_hf_write_access(cfg.policy.repo_id)
+    
     cfg.validate()
     logging.info(pformat(cfg.to_dict()))
 

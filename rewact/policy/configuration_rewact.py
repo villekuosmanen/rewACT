@@ -12,10 +12,36 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import Optional
 
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.policies.act.configuration_act import ACTConfig
+
+
+@dataclass
+class DinoV3Config:
+    variant: str = "vitl16"
+    # Path to a local DINOv3 checkpoint.
+    weights: str | None = None
+    patch_size: int = 16
+    # Placeholder for future (not wired yet):
+    preprocess: str = "none"
+
+
+@dataclass
+class VJepa2Config:
+    variant: str = "vit_large"
+    # Path to a local V-JEPA 2 checkpoint.
+    weights: str | None = None
+    patch_size: int = 16
+
+
+@dataclass
+class SAM3Config:
+    variant: str = "vit_l"
+    # Path to a local SAM 3 checkpoint.
+    weights: str | None = None
 
 
 @PreTrainedConfig.register_subclass("rewact")
@@ -28,13 +54,12 @@ class RewACTConfig(ACTConfig):
     # Vision encoder abstraction.
     # - "resnet": torchvision resnet -> feature map -> flatten tokens (current behavior)
     # - "dinov3": dinov3 ViT-L/16 -> patch tokens
+    # - "vjepa2": v-jepa 2 video vit -> spatial tokens
+    # - "sam3": sam 3 perception encoder -> unconditioned tokens
     vision_encoder_type: str = "resnet"
     freeze_vision_encoder: bool = True
 
-    # DINOv3-specific.
-    dinov3_variant: str = "vitl16"
-    # Path to a local DINOv3 checkpoint.
-    dinov3_weights: str | None = None
-    dinov3_patch_size: int = 16
-    # Placeholder for future (not wired yet):
-    dinov3_preprocess: str = "none"
+    # Nested backbone configurations (None when not in use)
+    dinov3: Optional[DinoV3Config] = None
+    vjepa2: Optional[VJepa2Config] = None
+    sam3: Optional[SAM3Config] = None

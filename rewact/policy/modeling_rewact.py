@@ -31,7 +31,7 @@ from lerobot.policies.act.modeling_act import (
 )
 
 from rewact.policy import RewACTConfig
-from rewact.vision_encoders import make_vision_encoder
+from rewact.vision import make_vision_encoder
 
 
 class RewACTPolicy(PreTrainedPolicy):

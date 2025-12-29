@@ -62,14 +62,14 @@ So at 480x640, ViT/16 gives 30 * 40 = 1200 tokens per camera, while ConvNeXt giv
 
 You can train a RewACT policy for any standard LeRobot dataset using the `scripts/train.py` script. This script basically copies the standard LeRobot training script so it should work directly with any command or `launch.json` config you use in LeRobot.
 
+Note: `job_name` and `output_dir` default to the model name from `policy.repo_id` (e.g. `so100_test` → `outputs/train/so100_test`).
+
 ```
 python scripts/train.py \
 --dataset.repo_id=danaaubakirova/so100_task_2 \
 --dataset.episodes=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19] \
 --policy.type=rewact \
---policy.repo_id=villekuosmanen/so100_test \
---output_dir=outputs/train/so100_test_2 \
---job_name=so100_test \
+--policy.repo_id=<your-hf-user>/so100_resnet \
 --batch_size=32 \
 --eval_freq=-1 \
 --log_freq=50 \
@@ -84,9 +84,7 @@ python scripts/train.py \
 --dataset.repo_id=danaaubakirova/so100_task_2 \
 --dataset.episodes=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19] \
 --policy.type=rewact \
---policy.repo_id=<YOUR_HF_REPO_ID> \
---output_dir=outputs/train/<RUN_NAME> \
---job_name=<RUN_NAME> \
+--policy.repo_id=<your-hf-user>/so100_dinov3 \
 --batch_size=1 \
 --eval_freq=-1 \
 --log_freq=50 \
