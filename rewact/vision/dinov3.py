@@ -40,15 +40,15 @@ class DinoV3VisionEncoder(VisionEncoder):
                 "DINOv3 is not available. Install the local repo, e.g. `pip install -e /home/user/Desktop/code/dinov3`."
             ) from e
 
-        variant_to_ctor = {
+        variant_to_constructor = {
             "vitb16": (dinov3_vitb16, "vit"),
             "vitl16": (dinov3_vitl16, "vit"),
             "convnext_base": (dinov3_convnext_base, "convnext"),
             "convnext_large": (dinov3_convnext_large, "convnext"),
         }
-        if variant not in variant_to_ctor:
-            raise ValueError(f"Unsupported DINOv3 variant: {variant}. Supported: {sorted(variant_to_ctor.keys())}")
-        ctor, grid_kind = variant_to_ctor[variant]
+        if variant not in variant_to_constructor:
+            raise ValueError(f"Unsupported DINOv3 variant: {variant}. Supported: {sorted(variant_to_constructor.keys())}")
+        constructor, grid_kind = variant_to_constructor[variant]
         self.variant = variant
         self.grid_kind = grid_kind
 
@@ -59,7 +59,7 @@ class DinoV3VisionEncoder(VisionEncoder):
 
         # Note: DINOv3 hub loader returns a DinoVisionTransformer. `forward_features(x)` returns a dict
         # with `x_norm_patchtokens: (B, N_patches, embed_dim)`.
-        self.dinov3_model = ctor(pretrained=True, weights=weights)
+        self.dinov3_model = constructor(pretrained=True, weights=weights)
 
         # For ViT variants only.
         self.vit_patch_size = int(vit_patch_size)

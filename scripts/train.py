@@ -32,8 +32,8 @@ With DINOv3 backbone:
         --policy.repo_id=your-hf-user/so100_rewact_dinov3 \
         --batch_size=1 --steps=1000 --save_freq=500 \
         --policy.vision_encoder_type=dinov3 \
-        --policy.dinov3_variant=vitb16 \
-        --policy.dinov3_weights=/path/to/dinov3_vitb16.pth
+        --policy.dinov3.variant=vitb16 \
+        --policy.dinov3.weights=/path/to/dinov3_vitb16.pth
 
 job_name and output_dir default to the model name from policy.repo_id.
 See README.md for all options.
@@ -203,7 +203,8 @@ def train(cfg: TrainPipelineConfig):
         set_seed(cfg.seed)
 
     # Check device is available
-    device = get_safe_torch_device(cfg.policy.device, log=True)
+    device_str = cfg.policy.device if cfg.policy.device is not None else "cuda"
+    device = get_safe_torch_device(device_str, log=True)
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
 
@@ -223,7 +224,7 @@ def train(cfg: TrainPipelineConfig):
     
     # Create RewACT policy using the utility function
     policy = make_rewact_policy(cfg.policy, dataset.meta)
-
+    policy.to(device)
 
     logging.info("Creating optimizer and scheduler")
     optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)

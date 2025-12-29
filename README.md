@@ -27,11 +27,11 @@ Use these policy flags (example: **ViT-B/16**):
 
 ```
 --policy.vision_encoder_type=dinov3 \
---policy.dinov3_variant=vitb16 \
---policy.dinov3_weights=/ABS/PATH/TO/dinov3_vitb16_pretrain_*.pth
+--policy.dinov3.variant=vitb16 \
+--policy.dinov3.weights=/ABS/PATH/TO/dinov3_vitb16_pretrain_*.pth
 ```
 
-Supported `dinov3_variant` values:
+Supported `dinov3.variant` values:
 - `vitb16`
 - `vitl16`
 - `convnext_base`
@@ -91,8 +91,8 @@ python scripts/train.py \
 --save_freq=500 \
 --steps=1000 \
 --policy.vision_encoder_type=dinov3 \
---policy.dinov3_variant=<vitb16|vitl16|convnext_base|convnext_large> \
---policy.dinov3_weights=/ABS/PATH/TO/<dinov3_checkpoint>.pth
+--policy.dinov3.variant=<vitb16|vitl16|convnext_base|convnext_large> \
+--policy.dinov3.weights=/ABS/PATH/TO/<dinov3_checkpoint>.pth
 ```
 
 ### Evaluating the trained RewACT policy

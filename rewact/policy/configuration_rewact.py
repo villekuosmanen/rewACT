@@ -63,3 +63,23 @@ class RewACTConfig(ACTConfig):
     dinov3: Optional[DinoV3Config] = None
     vjepa2: Optional[VJepa2Config] = None
     sam3: Optional[SAM3Config] = None
+
+    def __post_init__(self):
+        # Keep `pretrained_backbone_weights` aligned with the selected vision encoder.
+        # - For resnet, this remains the torchvision "weights" enum string (inherited from ACTConfig).
+        # - For other encoders, this is not consumed by the model builders, but it *is* printed in
+        #   config dumps; we set it to the actual checkpoint path to avoid confusion.
+        if self.vision_encoder_type == "dinov3" and self.dinov3:
+            self.pretrained_backbone_weights = self.dinov3.weights
+        elif self.vision_encoder_type == "vjepa2" and self.vjepa2:
+            self.pretrained_backbone_weights = self.vjepa2.weights
+        elif self.vision_encoder_type == "sam3" and self.sam3:
+            self.pretrained_backbone_weights = self.sam3.weights
+
+        # Set vision_backbone to reflect the actual encoder being used
+        if self.vision_encoder_type == "dinov3" and self.dinov3:
+            self.vision_backbone = f"dinov3_{self.dinov3.variant}"
+        elif self.vision_encoder_type == "vjepa2" and self.vjepa2:
+            self.vision_backbone = f"vjepa2_{self.vjepa2.variant}"
+        elif self.vision_encoder_type == "sam3" and self.sam3:
+            self.vision_backbone = f"sam3_{self.sam3.variant}"

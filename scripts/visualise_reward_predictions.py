@@ -149,9 +149,8 @@ def main():
     print("Loading policy...")
     policy, _ = load_policy(args.policy_path, dataset.meta, args.policy_overrides)
     
-    if hasattr(policy, 'model'):
-        policy.model.eval()
-        policy.model.to(device)
+    policy.eval()
+    policy.to(device)
     
     analyze_episode(dataset, policy, args.episode_id, device)
 

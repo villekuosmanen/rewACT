@@ -44,18 +44,18 @@ class VJepa2VisionEncoder(VisionEncoder):
             ) from e
 
         # V-JEPA 2 variants
-        variant_to_ctor = {
+        variant_to_constructor = {
             "vit_large": (vit_encoder.vit_large_rope, 1024),
             "vit_huge": (vit_encoder.vit_huge_rope, 1280),
             "vit_giant": (vit_encoder.vit_giant_xformers_rope, 1408),
         }
-        if variant not in variant_to_ctor:
-            raise ValueError(f"Unsupported V-JEPA 2 variant: {variant}. Supported: {sorted(variant_to_ctor.keys())}")
+        if variant not in variant_to_constructor:
+            raise ValueError(f"Unsupported V-JEPA 2 variant: {variant}. Supported: {sorted(variant_to_constructor.keys())}")
 
-        ctor, embed_dim = variant_to_ctor[variant]
+        constructor, embed_dim = variant_to_constructor[variant]
 
         # Initialize model for spatial mode (num_frames=1)
-        self.vjepa_model = ctor(patch_size=vit_patch_size, num_frames=1)
+        self.vjepa_model = constructor(patch_size=vit_patch_size, num_frames=1)
 
         if not isinstance(weights, str) or len(weights) == 0:
             raise ValueError("vjepa2_weights must be a non-empty local checkpoint path.")
