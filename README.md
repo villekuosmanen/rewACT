@@ -48,12 +48,6 @@ python scripts/smoke_test_vision_encoders.py \
   --h 480 --w 640 --num-cameras 2 --batch-size 2
 ```
 
-Tip: token count is roughly:
-- **ViT (DINOv3, patch=16)**: (H/16) * (W/16)
-- **ConvNeXt (DINOv3)**: typically (H/32) * (W/32) (effective stride ~32)
-
-So at 480x640, ViT/16 gives 30 * 40 = 1200 tokens per camera, while ConvNeXt gives 15 * 20 = 300 tokens per camera (about 4x fewer tokens).
-
 ## Quick Start
 
 ### Train a RewACT policy
@@ -75,7 +69,7 @@ python scripts/train.py \
 --steps=10000
 ```
 
-To use a DINOv3 vision backbone, add these flags (example shown with placeholders):
+To use a DINOv3 vision backbone, add these flags:
 
 ```
 python scripts/train.py \
@@ -102,7 +96,7 @@ python scripts/visualise_reward_predictions.py \
 --dataset-repo-id "danaaubakirova/so100_task_2" \
 --episode-id 24 \
 --policy-path "outputs/train/so100_test/checkpoints/last/pretrained_model" \
---output "outputs/eval_ep24.mp4"
+--output "outputs/eval_resnet_ep24.mp4"
 ```
 
 Note: `scripts/visualise_reward_predictions.py` defaults to `outputs/reward_visualization.mp4` if `--output` is not provided.
