@@ -84,7 +84,8 @@ python scripts/train.py \
 --steps=1000 \
 --policy.vision_encoder_type=dinov3 \
 --policy.dinov3.variant=<vitb16|vitl16|convnext_base|convnext_large> \
---policy.dinov3.weights=/ABS/PATH/TO/<dinov3_checkpoint>.pth
+--policy.dinov3.weights=/ABS/PATH/TO/<dinov3_checkpoint>.pth \
+--policy.dinov3.use_patch_merge=True
 ```
 
 ### Evaluating the trained RewACT policy
