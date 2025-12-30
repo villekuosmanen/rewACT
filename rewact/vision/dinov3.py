@@ -4,6 +4,7 @@ import os
 import einops
 import torch
 from torch import Tensor, nn
+from lerobot.policies.act.modeling_act import ACTSinusoidalPositionEmbedding2d
 from .base import VisionEncoder
 
 
@@ -20,12 +21,15 @@ class DinoV3VisionEncoder(VisionEncoder):
         vit_patch_size: int = 16,
         # Learned patch-pos is stored as a small base grid and interpolated to runtime Hp×Wp.
         pos_base_hw: tuple[int, int] = (30, 40),
+        use_learned_pos_embed: bool = False,
     ) -> None:
         super().__init__()
 
         if num_cameras <= 0:
             raise ValueError(f"num_cameras must be >= 1. Got {num_cameras}.")
         self.num_cameras = num_cameras
+        self.dim_model = dim_model
+        self.use_learned_pos_embed = use_learned_pos_embed
 
         # Lazy import so ResNet users don't need dinov3 installed.
         try:
@@ -70,28 +74,39 @@ class DinoV3VisionEncoder(VisionEncoder):
             raise RuntimeError("Unexpected DINOv3 model: missing `embed_dim`.")
         self.proj = nn.Linear(int(embed_dim), dim_model)
 
-        # Learned positional embeddings.
-        h0, w0 = pos_base_hw
-        if h0 <= 0 or w0 <= 0:
-            raise ValueError(f"pos_base_hw must be positive. Got {pos_base_hw}.")
-        self.patch_pos_base = nn.Parameter(torch.zeros(1, dim_model, h0, w0))
-        nn.init.trunc_normal_(self.patch_pos_base, std=0.02)
+        if use_learned_pos_embed:
+            # Learned positional embeddings.
+            h0, w0 = pos_base_hw
+            if h0 <= 0 or w0 <= 0:
+                raise ValueError(f"pos_base_hw must be positive. Got {pos_base_hw}.")
+            self.patch_pos_base = nn.Parameter(torch.zeros(1, dim_model, h0, w0))
+            nn.init.trunc_normal_(self.patch_pos_base, std=0.02)
 
-        self.camera_embed = nn.Embedding(num_cameras, dim_model)
-        nn.init.trunc_normal_(self.camera_embed.weight, std=0.02)
+            self.camera_embed = nn.Embedding(num_cameras, dim_model)
+            nn.init.trunc_normal_(self.camera_embed.weight, std=0.02)
+        else:
+            self.pos_embed_2d = ACTSinusoidalPositionEmbedding2d(dim_model // 2)
 
     def _make_pos_tokens(self, *, hp: int, wp: int, device, dtype, cam_idx: int) -> Tensor:
-        # Interpolate base grid -> (1, D, Hp, Wp), then flatten to (Hp*Wp, 1, D).
-        pos = torch.nn.functional.interpolate(
-            self.patch_pos_base.to(device=device, dtype=dtype),
-            size=(hp, wp),
-            mode="bicubic",
-            align_corners=False,
-        )
-        pos = einops.rearrange(pos, "1 d h w -> (h w) 1 d")
-        cam = self.camera_embed.weight[cam_idx].to(device=device, dtype=dtype).view(1, 1, -1)
-        pos = pos + cam  # broadcast cam over patches
-        return pos.contiguous()
+        if self.use_learned_pos_embed:
+            # Interpolate base grid -> (1, D, Hp, Wp), then flatten to (Hp*Wp, 1, D).
+            pos = torch.nn.functional.interpolate(
+                self.patch_pos_base.to(device=device, dtype=dtype),
+                size=(hp, wp),
+                mode="bicubic",
+                align_corners=False,
+            )
+            pos = einops.rearrange(pos, "1 d h w -> (h w) 1 d")
+            cam = self.camera_embed.weight[cam_idx].to(device=device, dtype=dtype).view(1, 1, -1)
+            pos = pos + cam  # broadcast cam over patches
+            return pos.contiguous()
+        else:
+            # Simple sinusoidal embeddings (ignoring cam_idx)
+            # Create a dummy tensor of the correct spatial shape to get pos embeddings
+            dummy = torch.zeros((1, self.dim_model, hp, wp), device=device, dtype=dtype)
+            pos = self.pos_embed_2d(dummy)  # (1, D, Hp, Wp)
+            pos = einops.rearrange(pos, "1 d h w -> (h w) 1 d")
+            return pos.contiguous()
 
     @staticmethod
     def _infer_hw_from_seq_len(n_tokens: int, *, h: int, w: int) -> tuple[int, int]:

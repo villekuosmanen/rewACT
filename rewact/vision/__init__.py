@@ -35,6 +35,7 @@ def make_vision_encoder(config) -> VisionEncoder:
             weights=str(c.weights),
             vit_patch_size=c.patch_size,
             pos_base_hw=_infer_pos_base_hw(config, vit_patch_size=c.patch_size),
+            use_learned_pos_embed=getattr(c, "use_learned_pos_embed", False),
         )
     elif vision_type == "vjepa2":
         from .vjepa2 import VJepa2VisionEncoder
@@ -51,6 +52,7 @@ def make_vision_encoder(config) -> VisionEncoder:
             weights=str(c.weights),
             vit_patch_size=c.patch_size,
             pos_base_hw=_infer_pos_base_hw(config, vit_patch_size=c.patch_size),
+            use_learned_pos_embed=getattr(c, "use_learned_pos_embed", False),
         )
     else:
         raise ValueError(f"Unknown vision_encoder_type: {vision_type}")

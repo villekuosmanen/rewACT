@@ -5,6 +5,7 @@ import sys
 import einops
 import torch
 from torch import Tensor, nn
+from lerobot.policies.act.modeling_act import ACTSinusoidalPositionEmbedding2d
 from .base import VisionEncoder
 
 
@@ -21,12 +22,15 @@ class VJepa2VisionEncoder(VisionEncoder):
         vit_patch_size: int = 16,
         tubelet_size: int = 2,      # number of frames in the video tubelet
         pos_base_hw: tuple[int, int] = (30, 40),
+        use_learned_pos_embed: bool = False,
     ) -> None:
         super().__init__()
 
         if num_cameras <= 0:
             raise ValueError(f"num_cameras must be >= 1. Got {num_cameras}.")
         self.num_cameras = num_cameras
+        self.dim_model = dim_model
+        self.use_learned_pos_embed = use_learned_pos_embed
         self.variant = variant
         self.vit_patch_size = vit_patch_size
         self.tubelet_size = tubelet_size
@@ -76,25 +80,35 @@ class VJepa2VisionEncoder(VisionEncoder):
         # Project V-JEPA embed_dim -> ACT dim_model
         self.proj = nn.Linear(embed_dim, dim_model)
 
-        # Learned positional embeddings (DINOv3 style)
-        h0, w0 = pos_base_hw
-        self.patch_pos_base = nn.Parameter(torch.zeros(1, dim_model, h0, w0))
-        nn.init.trunc_normal_(self.patch_pos_base, std=0.02)
+        if use_learned_pos_embed:
+            # Learned positional embeddings (DINOv3 style)
+            h0, w0 = pos_base_hw
+            self.patch_pos_base = nn.Parameter(torch.zeros(1, dim_model, h0, w0))
+            nn.init.trunc_normal_(self.patch_pos_base, std=0.02)
 
-        self.camera_embed = nn.Embedding(num_cameras, dim_model)
-        nn.init.trunc_normal_(self.camera_embed.weight, std=0.02)
+            self.camera_embed = nn.Embedding(num_cameras, dim_model)
+            nn.init.trunc_normal_(self.camera_embed.weight, std=0.02)
+        else:
+            self.pos_embed_2d = ACTSinusoidalPositionEmbedding2d(dim_model // 2)
 
     def _make_pos_tokens(self, *, hp: int, wp: int, device, dtype, cam_idx: int) -> Tensor:
-        pos = torch.nn.functional.interpolate(
-            self.patch_pos_base.to(device=device, dtype=dtype),
-            size=(hp, wp),
-            mode="bicubic",
-            align_corners=False,
-        )
-        pos = einops.rearrange(pos, "1 d h w -> (h w) 1 d")
-        cam = self.camera_embed.weight[cam_idx].to(device=device, dtype=dtype).view(1, 1, -1)
-        pos = pos + cam
-        return pos.contiguous()
+        if self.use_learned_pos_embed:
+            pos = torch.nn.functional.interpolate(
+                self.patch_pos_base.to(device=device, dtype=dtype),
+                size=(hp, wp),
+                mode="bicubic",
+                align_corners=False,
+            )
+            pos = einops.rearrange(pos, "1 d h w -> (h w) 1 d")
+            cam = self.camera_embed.weight[cam_idx].to(device=device, dtype=dtype).view(1, 1, -1)
+            pos = pos + cam
+            return pos.contiguous()
+        else:
+            # Simple sinusoidal embeddings (ignoring cam_idx)
+            dummy = torch.zeros((1, self.dim_model, hp, wp), device=device, dtype=dtype)
+            pos = self.pos_embed_2d(dummy)
+            pos = einops.rearrange(pos, "1 d h w -> (h w) 1 d")
+            return pos.contiguous()
 
     def forward(self, img: Tensor, *, cam_idx: int = 0) -> tuple[Tensor, Tensor]:
         """
