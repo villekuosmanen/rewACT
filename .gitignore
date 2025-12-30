@@ -1,4 +1,5 @@
 
+*.pt 
 *.pth
 
 # Byte-compiled / optimized / DLL files

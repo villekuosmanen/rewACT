@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 
 # Quickstart:
-# python scripts/smoke_test_vision_encoders.py --device cpu
+# python scripts/smoke_test_vision_encoders.py --vjepa2-weights ./vjepa2_vitl.pt --vjepa2-variant vit_large --batch-size 1 --num-cameras 1
+
+# Options: --dinov3-weights, --dinov3-variant, --device, --h, --w, --batch-size, --num-cameras
 
 import argparse
 import os
@@ -132,9 +134,10 @@ def smoke_test_vjepa2(
         return
 
     for cam_idx in range(num_cameras):
-        # Generate synthetic image data (random noise) for shape testing
+        # Generate synthetic video data: expand image to (B, 3, T, H, W) with T=tubelet_size
         img = torch.randn(batch_size, 3, h, w, device=device)
-        tokens, pos = enc(img, cam_idx=cam_idx)
+        video = img.unsqueeze(2).expand(-1, -1, 2, -1, -1)  # repeat frame for tubelet_size=2
+        tokens, pos = enc(video, cam_idx=cam_idx)
         assert pos.shape[0] == tokens.shape[0] and pos.shape[2] == tokens.shape[2], (tokens.shape, pos.shape)
         assert pos.shape[1] in (1, batch_size), pos.shape
         assert tokens.shape[1] == batch_size and tokens.shape[2] == dim_model, tokens.shape

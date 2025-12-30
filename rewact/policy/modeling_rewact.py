@@ -158,6 +158,11 @@ class RewACTPolicy(PreTrainedPolicy):
         if self.config.image_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
             batch[OBS_IMAGES] = [batch[key] for key in self.config.image_features]
+            # Past images for VJEPA2 temporal context
+            if self.config.vision_encoder_type == "vjepa2":
+                past_keys = [k.replace("observation.images.", "observation.images_past.") for k in self.config.image_features]
+                if all(k in batch for k in past_keys):
+                    batch["observation.images_past"] = [batch[k] for k in past_keys]
 
         actions, reward_preds, _ = self.model(batch)
         actions = self.unnormalize_outputs({ACTION: actions})[ACTION]
@@ -169,6 +174,11 @@ class RewACTPolicy(PreTrainedPolicy):
         if self.config.image_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
             batch[OBS_IMAGES] = [batch[key] for key in self.config.image_features]
+            # Past images for VJEPA2 temporal context
+            if self.config.vision_encoder_type == "vjepa2":
+                past_keys = [k.replace("observation.images.", "observation.images_past.") for k in self.config.image_features]
+                if all(k in batch for k in past_keys):
+                    batch["observation.images_past"] = [batch[k] for k in past_keys]
 
         batch = self.normalize_targets(batch)
         actions_hat, reward_hat, (mu_hat, log_sigma_x2_hat) = self.model(batch)
@@ -422,6 +432,10 @@ class RewACT(nn.Module):
 
         if self.config.image_features:
             for cam_idx, img in enumerate(batch["observation.images"]):
+                # For VJEPA2: stack past + current frame into video tensor
+                if self.config.vision_encoder_type == "vjepa2" and "observation.images_past" in batch:
+                    past_img = batch["observation.images_past"][cam_idx]
+                    img = torch.stack([past_img, img], dim=2)  # (B, 3, 2, H, W)
                 img_tokens, img_pos_tokens = self.vision_encoder(img, cam_idx=cam_idx)
                 # Extend immediately instead of accumulating and concatenating.
                 encoder_input_tokens.extend(list(img_tokens))

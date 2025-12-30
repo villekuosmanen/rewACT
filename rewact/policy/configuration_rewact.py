@@ -35,6 +35,8 @@ class VJepa2Config:
     # Path to a local V-JEPA 2 checkpoint.
     weights: str | None = None
     patch_size: int = 16
+    # Frames to look back for temporal context (e.g., 30 = 1 sec at 30fps)
+    temporal_offset: int = 30
 
 
 @dataclass
@@ -83,3 +85,10 @@ class RewACTConfig(ACTConfig):
             self.vision_backbone = f"vjepa2_{self.vjepa2.variant}"
         elif self.vision_encoder_type == "sam3" and self.sam3:
             self.vision_backbone = f"sam3_{self.sam3.variant}"
+
+    @property
+    def temporal_offset(self) -> int:
+        """Return temporal_offset for VJEPA2, else 0."""
+        if self.vision_encoder_type == "vjepa2" and self.vjepa2:
+            return self.vjepa2.temporal_offset
+        return 0

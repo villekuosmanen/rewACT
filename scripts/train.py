@@ -210,7 +210,7 @@ def train(cfg: TrainPipelineConfig):
 
     logging.info("Creating dataset")
     dataset = make_dataset(cfg)
-    dataset = LeRobotDatasetWithReward(dataset=dataset)
+    dataset = LeRobotDatasetWithReward(dataset=dataset, temporal_offset=cfg.policy.temporal_offset)
 
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,

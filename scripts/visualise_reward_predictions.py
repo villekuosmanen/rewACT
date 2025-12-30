@@ -14,6 +14,7 @@ Output: outputs/reward_visualization.mp4
 
 import argparse
 import json
+import tempfile
 from pathlib import Path
 
 import draccus
@@ -24,7 +25,8 @@ from tqdm import tqdm
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
-from reward_wrapper import ACTPolicyWithReward, create_reward_visualization_video
+from reward_wrapper import ACTPolicyWithReward, create_reward_frame, create_video_from_frames
+from rewact.dataset_with_reward import LeRobotDatasetWithReward
 from rewact.utils import make_rewact_policy
 
 
@@ -61,7 +63,7 @@ def load_policy(policy_path: str, dataset_meta, policy_overrides: list = None):
         policy_cfg.pretrained_path = str(policy_path)
 
     policy = make_rewact_policy(policy_cfg, dataset_meta)
-    return ACTPolicyWithReward(policy), policy_cfg
+    return ACTPolicyWithReward(policy, recording_enabled=False), policy_cfg
 
 
 def prepare_observation(frame: dict, device: torch.device) -> dict:
@@ -99,28 +101,36 @@ def analyze_episode(dataset: LeRobotDataset, policy, episode_id: int, device: to
     print(f"Analyzing episode {episode_id} ({len(episode_frames)} frames)")
     
     reward_data = []
-    reward_images = []
-    
-    for i in tqdm(range(len(episode_frames)), desc="Processing"):
-        frame = dataset[episode_frames[i]['index'].item()]
-        observation = prepare_observation(frame, device)
-        
-        with torch.inference_mode():
-            _, reward = policy.select_action(observation)
-            reward_data.append({'step': i, 'reward': reward})
-            
-            # Extract images for visualization
-            images = []
-            for key in observation:
-                if "image" in key:
-                    img = observation[key].squeeze(0) * 255
-                    img = img.permute(1, 2, 0).cpu()
-                    images.append(img)
-            reward_images.append(images)
-    
-    # Create video
     output_file = "outputs/reward_visualization.mp4"
-    create_reward_visualization_video(reward_images, reward_data, output_file, fps=dataset.fps)
+    Path("outputs").mkdir(exist_ok=True)
+    
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        
+        for i in tqdm(range(len(episode_frames)), desc="Processing"):
+            frame = dataset[episode_frames[i]['index'].item()]
+            observation = prepare_observation(frame, device)
+            
+            with torch.inference_mode():
+                _, reward = policy.select_action(observation)
+                reward_data.append({'step': i, 'reward': reward})
+                
+                # Extract images for visualization
+                images = []
+                for key in observation:
+                    if "image" in key and "past" not in key:
+                        img = observation[key].squeeze(0) * 255
+                        img = img.permute(1, 2, 0).cpu()
+                        images.append(img)
+                
+                # Write frame immediately to disk
+                frame_path = temp_path / f"frame_{i:06d}.png"
+                create_reward_frame(images, reward_data[-1], reward_data, frame_path, (640, 480), 200, total_steps=len(episode_frames))
+            
+        
+        # Create video from frames
+        print("Creating video...")
+        create_video_from_frames(temp_path, output_file, fps=dataset.fps)
     
     # Print stats
     rewards = [r['reward'] for r in reward_data]
@@ -140,14 +150,20 @@ def main():
     device = torch.device(args.device)
     print(f"Loading dataset: {args.dataset_repo_id}")
     
-    dataset = LeRobotDataset(args.dataset_repo_id)
-    print(f"Dataset: {dataset.num_episodes} episodes")
+    base_dataset = LeRobotDataset(args.dataset_repo_id)
+    print(f"Dataset: {base_dataset.num_episodes} episodes")
     
-    if args.episode_id >= dataset.num_episodes:
-        raise ValueError(f"Episode {args.episode_id} not found (max: {dataset.num_episodes - 1})")
+    if args.episode_id >= base_dataset.num_episodes:
+        raise ValueError(f"Episode {args.episode_id} not found (max: {base_dataset.num_episodes - 1})")
     
     print("Loading policy...")
-    policy, _ = load_policy(args.policy_path, dataset.meta, args.policy_overrides)
+    policy, _ = load_policy(args.policy_path, base_dataset.meta, args.policy_overrides)
+    
+    # Wrap dataset (with temporal_offset for VJEPA2)
+    temporal_offset = 0
+    if policy.config.vision_encoder_type == "vjepa2":
+        temporal_offset = getattr(policy.config, 'temporal_offset', 30)
+    dataset = LeRobotDatasetWithReward(base_dataset, temporal_offset=temporal_offset)
     
     policy.eval()
     policy.to(device)

@@ -9,7 +9,7 @@ from .base import VisionEncoder
 
 
 class VJepa2VisionEncoder(VisionEncoder):
-    """V-JEPA 2 ViT -> patch tokens -> projection -> tokens with learned (patch + camera) position embeddings."""
+    """V-JEPA 2 video ViT: (B,3,T,H,W) -> patch tokens -> projection -> learned (patch + camera) pos embeddings."""
 
     def __init__(
         self,
@@ -17,8 +17,9 @@ class VJepa2VisionEncoder(VisionEncoder):
         dim_model: int,
         num_cameras: int,
         variant: str = "vit_large",
-        weights: str,
+        weights: str,                  # path to the V-JEPA 2 checkpoint
         vit_patch_size: int = 16,
+        tubelet_size: int = 2,      # number of frames in the video tubelet
         pos_base_hw: tuple[int, int] = (30, 40),
     ) -> None:
         super().__init__()
@@ -28,6 +29,7 @@ class VJepa2VisionEncoder(VisionEncoder):
         self.num_cameras = num_cameras
         self.variant = variant
         self.vit_patch_size = vit_patch_size
+        self.tubelet_size = tubelet_size
 
         # Lazy import from ../vjepa2
         from pathlib import Path
@@ -54,8 +56,8 @@ class VJepa2VisionEncoder(VisionEncoder):
 
         constructor, embed_dim = variant_to_constructor[variant]
 
-        # Initialize model for spatial mode (num_frames=1)
-        self.vjepa_model = constructor(patch_size=vit_patch_size, num_frames=1)
+        # Initialize model matching checkpoint (video mode with tubelet_size frames)
+        self.vjepa_model = constructor(patch_size=vit_patch_size, num_frames=tubelet_size, tubelet_size=tubelet_size)
 
         if not isinstance(weights, str) or len(weights) == 0:
             raise ValueError("vjepa2_weights must be a non-empty local checkpoint path.")
@@ -95,16 +97,19 @@ class VJepa2VisionEncoder(VisionEncoder):
         return pos.contiguous()
 
     def forward(self, img: Tensor, *, cam_idx: int = 0) -> tuple[Tensor, Tensor]:
+        """
+        Args:
+            img: (B, 3, T, H, W) video tensor where T >= tubelet_size
+            cam_idx: camera index for positional embedding
+        """
         if not (0 <= cam_idx < self.num_cameras):
             raise ValueError(f"cam_idx out of range. Got {cam_idx} with num_cameras={self.num_cameras}.")
 
-        # V-JEPA expects (B, 3, H, W) for 4D input or (B, 3, T, H, W) for 5D
+        _, _, _, h, w = img.shape
         patch_tokens = self.vjepa_model(img)  # (B, N, embed_dim)
 
         tokens = self.proj(patch_tokens)  # (B, N, D)
         tokens = tokens.transpose(0, 1).contiguous()  # (N, B, D)
-
-        _, _, h, w = img.shape
         hp = h // self.vit_patch_size
         wp = w // self.vit_patch_size
 
