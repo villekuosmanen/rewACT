@@ -127,6 +127,49 @@ def _check_hf_write_access(repo_id: str) -> None:
             raise RuntimeError(f"Cannot access HuggingFace repo '{repo_id}': {e}")
 
 
+
+def _check_hf_write_access(repo_id: str) -> None:
+    """Check if we have write access to the HuggingFace repo before training."""
+    from huggingface_hub import HfApi
+    from huggingface_hub.utils import HfHubHTTPError
+    
+    if not repo_id:
+        return
+    
+    api = HfApi()
+    try:
+        # Check if user is logged in
+        user_info = api.whoami()
+        username = user_info.get("name", "")
+    except Exception:
+        raise RuntimeError(
+            "Not logged in to HuggingFace. Run `huggingface-cli login` first."
+        )
+    
+    repo_owner = repo_id.split("/")[0]
+    
+    # Check if repo exists and we have write access
+    try:
+        repo_info = api.repo_info(repo_id, repo_type="model")
+        # Repo exists - check if we can write to it
+        # If we own it or are a collaborator, we're good
+        logging.info(f"HuggingFace repo '{repo_id}' exists and is accessible.")
+    except HfHubHTTPError as e:
+        if e.response.status_code == 404:
+            # Repo doesn't exist - check if we can create it
+            if repo_owner != username:
+                # Check if it's an org we belong to
+                orgs = [org.get("name", "") for org in user_info.get("orgs", [])]
+                if repo_owner not in orgs:
+                    raise RuntimeError(
+                        f"Cannot create repo '{repo_id}': you are logged in as '{username}' "
+                        f"but the repo owner '{repo_owner}' is not you or an org you belong to."
+                    )
+            logging.info(f"HuggingFace repo '{repo_id}' will be created on push.")
+        else:
+            raise RuntimeError(f"Cannot access HuggingFace repo '{repo_id}': {e}")
+
+
 def update_policy(
     train_metrics: MetricsTracker,
     policy: PreTrainedPolicy,
@@ -218,6 +261,7 @@ def train(cfg: TrainPipelineConfig):
     torch.backends.cuda.matmul.allow_tf32 = True
 
     logging.info("Creating dataset")
+<<<<<<< HEAD
     dataset = make_dataset(cfg, plugins=[EpisodeOutcomePlugin(), ControlModePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True)])
     dataset.meta.features['observation.eef_6d_pose']= {
         'dtype': "float32",
@@ -229,9 +273,22 @@ def train(cfg: TrainPipelineConfig):
             dataset.meta.stats['observation.eef_6d_pose'][stat_key],
             dataset.meta.stats['observation.state'][stat_key][-1:]
         ])
+=======
+    dataset = make_dataset(cfg)
+    dataset = LeRobotDatasetWithReward(dataset=dataset, temporal_offset=cfg.policy.temporal_offset)
+
+    # Create environment used for evaluating checkpoints during training on simulation data.
+    # On real-world data, no need to create an environment as evaluations are done outside train.py,
+    # using the eval.py instead, with gym_dora environment and dora-rs.
+    eval_env = None
+    if cfg.eval_freq > 0 and cfg.env is not None:
+        logging.info("Creating env")
+        eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
+>>>>>>> praveen-fork/main
 
     logging.info("Creating policy")
     policy = make_rewact_policy(cfg.policy, dataset.meta)
+<<<<<<< HEAD
 
     # Create processors - only provide dataset_stats if not resuming from saved processors
     processor_kwargs = {}
@@ -267,6 +324,9 @@ def train(cfg: TrainPipelineConfig):
         **processor_kwargs,
         **postprocessor_kwargs,
     )
+=======
+    policy.to(device)
+>>>>>>> praveen-fork/main
 
     logging.info("Creating optimizer and scheduler")
     optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)

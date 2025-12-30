@@ -33,7 +33,6 @@ from rewact.utils import make_rewact_policy
 from rewact.policies.factory import make_pre_post_processors
 
 
-
 def load_policy(policy_path: str, dataset, dataset_meta, policy_overrides: list = None) -> Tuple[torch.nn.Module, dict]:
     """Load and initialize a policy from checkpoint."""
     
