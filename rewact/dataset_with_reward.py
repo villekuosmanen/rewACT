@@ -96,6 +96,7 @@ class LeRobotDatasetWithReward:
         reward_end_pct: float = 0.95,
         mask_actions_for_eval_data: bool = False,
         mask_actions_for_fail_data: bool = False,
+        temporal_offset: int = 0,
     ):
         """
         Initialize the dataset wrapper with reward calculation parameters.
@@ -106,6 +107,7 @@ class LeRobotDatasetWithReward:
             reward_end_pct: Progress percentage where reward reaches maximum (1.0) - used for fallback
             mask_actions_for_eval_data: If True, mask actions from datasets with 'eval_' prefix
             mask_actions_for_fail_data: If True, mask actions from datasets with 'fail_' prefix
+            temporal_offset: Number of frames to look back for past observations (0 = disabled)
         """
         # Create the underlying dataset
         self._dataset = dataset
@@ -119,6 +121,7 @@ class LeRobotDatasetWithReward:
         # Store reward parameters (fallback when no keypoints are defined)
         self.reward_start_pct = reward_start_pct
         self.reward_end_pct = reward_end_pct
+        self.temporal_offset = temporal_offset
         
         # Store action masking parameters
         self.mask_actions_for_eval_data = mask_actions_for_eval_data
@@ -132,6 +135,18 @@ class LeRobotDatasetWithReward:
     def __getitem__(self, idx) -> dict:
         """Get an item from the dataset with calculated reward."""
         item = self._dataset[idx]
+        
+        # Add past frames if temporal_offset is set (for VJEPA2)
+        if self.temporal_offset > 0:
+            ep_idx = item["episode_index"].item()
+            ep_start = self._dataset.episode_data_index["from"][ep_idx].item()
+            past_idx = max(ep_start, idx - self.temporal_offset)
+            past_item = self._dataset[past_idx]
+            
+            for key in list(item.keys()):
+                if key.startswith("observation.images."):
+                    past_key = key.replace("observation.images.", "observation.images_past.")
+                    item[past_key] = past_item[key]
         
         # Add reward calculation
         item["reward"] = self._calculate_reward(idx, item)
