@@ -46,7 +46,7 @@ def smoke_test_resnet(
         assert pos.shape[0] == tokens.shape[0] and pos.shape[2] == tokens.shape[2], (tokens.shape, pos.shape)
         assert pos.shape[1] in (1, batch_size), pos.shape
         assert tokens.shape[1] == batch_size and tokens.shape[2] == dim_model, tokens.shape
-        print(f"[resnet cam={cam_idx}] tokens: {tuple(tokens.shape)}  pos: {tuple(pos.shape)}")
+        print(f"[resnet cam={cam_idx}] image tokens: {tuple(tokens.shape)}  pos tokens: {tuple(pos.shape)}")
 
 
 def smoke_test_dinov3(
