@@ -8,20 +8,40 @@ A PyTorch implementation of RewACT, extending the ACT (Action Chunking with Tran
 
 You can also install the package in editable mode by cloning the repository and using `pip install -e .`.
 
+## Modern Vision Backbones (optional)
+
+RewACT supports **DINOv3** and **V-JEPA 2**. To prevent ViT tokens from stretching attention too thin, RewACT uses **Patch Merging** to compress sequences 4x (for e.g. 1200 → 300). By merging $2x2$ blocks into "super-tokens", it maintains high-frequency detail while keeping the token count manageable for focused attention.
+
+### Installation (if needed)
+- **DINOv3**: Requires Python >= 3.11. `cd /path/to/dinov3 && pip install -e .`
+- **V-JEPA 2**: `cd /path/to/vjepa2 && pip install -e .`
+
+
+### Smoke test (token shapes)
+
+The smoke test prints the **token count** per camera. This helps monitor the quadratic self-attention cost (O(S^2)), which varies significantly across backbones.
+
+```
+python scripts/smoke_test_vision_encoders.py \
+  --dinov3-variant vitb16 \
+  --dinov3-weights /ABS/PATH/TO/dinov3_vitb16_pretrain_*.pth \
+  --h 480 --w 640 --num-cameras 2 --batch-size 2
+```
+
 ## Quick Start
 
 ### Train a RewACT policy
 
 You can train a RewACT policy for any standard LeRobot dataset using the `scripts/train.py` script. This script basically copies the standard LeRobot training script so it should work directly with any command or `launch.json` config you use in LeRobot.
 
+Note: `job_name` and `output_dir` default to the model name from `policy.repo_id` (e.g. `so100_test` → `outputs/train/so100_test`).
+
 ```
 python scripts/train.py \
 --dataset.repo_id=danaaubakirova/so100_task_2 \
 --dataset.episodes=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19] \
 --policy.type=rewact \
---policy.repo_id=villekuosmanen/so100_test \
---output_dir=outputs/train/so100_test_2 \
---job_name=so100_test \
+--policy.repo_id=<your-hf-user>/so100_resnet \
 --batch_size=32 \
 --eval_freq=-1 \
 --log_freq=50 \
@@ -29,16 +49,29 @@ python scripts/train.py \
 --steps=10000
 ```
 
+To use **DINOv3**, add these flags:
+```bash
+--policy.vision_encoder_type=dinov3 \
+--policy.dinov3.variant=vitb16 \
+--policy.dinov3.weights=/path/to/weights.pth \
+--policy.dinov3.use_patch_merge=True
+```
+
+*(Note: For **V-JEPA 2**, use `vision_encoder_type=vjepa2` and the `vjepa2.*` prefix instead. And never forget to set `use_patch_merge=True`)*
+
 ### Evaluating the trained RewACT policy
 
 To avoid overfitting, I highly recommend evaluating the trained policy using a validation or test dataset in the same training distribution.
 
-```
+```bash
 python scripts/visualise_reward_predictions.py \
 --dataset-repo-id "danaaubakirova/so100_task_2" \
 --episode-id 24 \
---policy-path "outputs/train/so100_test/checkpoints/last/pretrained_model"
+--policy-path "outputs/train/so100_test/checkpoints/last/pretrained_model" \
+--output "outputs/eval_resnet_ep24.mp4"
 ```
+
+Note: `scripts/visualise_reward_predictions.py` defaults to `outputs/reward_visualization.mp4` if `--output` is not provided.
 
 ## What is a reward model?
 

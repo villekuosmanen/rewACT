@@ -169,7 +169,8 @@ def create_reward_frame(
     all_reward_data: List[Dict],
     output_path: Path,
     image_size: Tuple[int, int],
-    graph_height: int
+    graph_height: int,
+    total_steps: int = None,
 ):
     """Create a single reward visualization frame with images and reward graph"""
     # Configuration
@@ -265,7 +266,7 @@ def create_reward_frame(
     
     if len(rewards_so_far) > 1:
         # Calculate graph coordinates
-        max_steps = max(50, len(all_reward_data))  # Show at least 50 steps worth of space
+        max_steps = total_steps if total_steps else max(50, len(all_reward_data))
         
         # Draw graph lines and points
         for i in range(1, len(rewards_so_far)):
