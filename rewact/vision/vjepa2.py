@@ -23,6 +23,7 @@ class VJepa2VisionEncoder(VisionEncoder):
         tubelet_size: int = 2,      # number of frames in the video tubelet
         pos_base_hw: tuple[int, int] = (30, 40),
         use_learned_pos_embed: bool = False,
+        use_patch_merge: bool = False,
     ) -> None:
         super().__init__()
 
@@ -31,6 +32,7 @@ class VJepa2VisionEncoder(VisionEncoder):
         self.num_cameras = num_cameras
         self.dim_model = dim_model
         self.use_learned_pos_embed = use_learned_pos_embed
+        self.use_patch_merge = use_patch_merge
         self.variant = variant
         self.vit_patch_size = vit_patch_size
         self.tubelet_size = tubelet_size
@@ -80,6 +82,10 @@ class VJepa2VisionEncoder(VisionEncoder):
         # Project V-JEPA embed_dim -> ACT dim_model
         self.proj = nn.Linear(embed_dim, dim_model)
 
+        if use_patch_merge:
+            # Patch merging: concat 2x2 (4 tokens) then project back to dim_model
+            self.merger_linear = nn.Linear(dim_model * 4, dim_model)
+
         if use_learned_pos_embed:
             # Learned positional embeddings (DINOv3 style)
             h0, w0 = pos_base_hw
@@ -110,6 +116,12 @@ class VJepa2VisionEncoder(VisionEncoder):
             pos = einops.rearrange(pos, "1 d h w -> (h w) 1 d")
             return pos.contiguous()
 
+    def freeze_backbone(self, freeze: bool = True) -> None:
+        """Freeze only the V-JEPA 2 backbone. Keep projection and pos-embed layers trainable."""
+        self.vjepa_model.requires_grad_(not freeze)
+        if freeze:
+            self.vjepa_model.eval()
+
     def forward(self, img: Tensor, *, cam_idx: int = 0) -> tuple[Tensor, Tensor]:
         """
         Args:
@@ -123,9 +135,21 @@ class VJepa2VisionEncoder(VisionEncoder):
         patch_tokens = self.vjepa_model(img)  # (B, N, embed_dim)
 
         tokens = self.proj(patch_tokens)  # (B, N, D)
-        tokens = tokens.transpose(0, 1).contiguous()  # (N, B, D)
         hp = h // self.vit_patch_size
         wp = w // self.vit_patch_size
+
+        if self.use_patch_merge:
+            # 1. Reshape to grid: (B, N, D) -> (B, D, Hp, Wp)
+            tokens = einops.rearrange(tokens, "b (h w) d -> b d h w", h=hp, w=wp)
+            # 2. Patch Merge (Space-to-Depth): (B, D, Hp, Wp) -> (B, 4D, Hp/2, Wp/2)
+            tokens = einops.rearrange(tokens, "b d (h p1) (w p2) -> b (d p1 p2) h w", p1=2, p2=2)
+            # 3. Project back to dim_model: (B, 4D, H', W') -> (B, H', W', 4D) -> (B, H', W', D)
+            tokens = self.merger_linear(tokens.permute(0, 2, 3, 1))
+            # 4. Flatten back: (B, H', W', D) -> (H'*W', B, D)
+            hp, wp = hp // 2, wp // 2
+            tokens = einops.rearrange(tokens, "b h w d -> (h w) b d")
+        else:
+            tokens = tokens.transpose(0, 1).contiguous()  # (N, B, D)
 
         pos_tokens = self._make_pos_tokens(
             hp=hp,

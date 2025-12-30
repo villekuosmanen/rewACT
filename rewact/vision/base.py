@@ -20,6 +20,15 @@ class VisionEncoder(nn.Module):
     def forward(self, img: Tensor, *, cam_idx: int = 0) -> tuple[Tensor, Tensor]:  # pragma: no cover
         raise NotImplementedError
 
+    def freeze_backbone(self, freeze: bool = True) -> None:
+        """Freeze or unfreeze the heavy vision backbone. 
+        Projection layers and positional embeddings should generally remain trainable.
+        """
+        # Default implementation: freeze everything (can be overridden)
+        self.requires_grad_(not freeze)
+        if freeze:
+            self.eval()
+
 
 def _infer_pos_base_hw(config, *, vit_patch_size: int) -> tuple[int, int]:
     """Infer a sensible base grid (Hp, Wp) from configured image shapes. """

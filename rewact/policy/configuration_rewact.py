@@ -28,6 +28,7 @@ class DinoV3Config:
     # Placeholder for future (not wired yet):
     preprocess: str = "none"
     use_learned_pos_embed: bool = False
+    use_patch_merge: bool = False
 
 
 @dataclass
@@ -39,6 +40,7 @@ class VJepa2Config:
     # Frames to look back for temporal context (e.g., 30 = 1 sec at 30fps)
     temporal_offset: int = 30
     use_learned_pos_embed: bool = False
+    use_patch_merge: bool = False
 
 
 @dataclass

@@ -37,6 +37,12 @@ class ResNetVisionEncoder(VisionEncoder):
         self.feat_proj = nn.Conv2d(backbone_model.fc.in_features, dim_model, kernel_size=1)
         self.pos_embed_2d = ACTSinusoidalPositionEmbedding2d(dim_model // 2)
 
+    def freeze_backbone(self, freeze: bool = True) -> None:
+        """Freeze only the ResNet backbone. Keep projection layers trainable."""
+        self.resnet_feature_extractor.requires_grad_(not freeze)
+        if freeze:
+            self.resnet_feature_extractor.eval()
+
     def forward(self, img: Tensor, *, cam_idx: int = 0) -> tuple[Tensor, Tensor]:
         feat = self.resnet_feature_extractor(img)["feature_map"]  # (B, Cb, H', W')
         pos = self.pos_embed_2d(feat).to(dtype=feat.dtype)  # (1, D, H', W')

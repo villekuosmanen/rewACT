@@ -8,36 +8,34 @@ A PyTorch implementation of RewACT, extending the ACT (Action Chunking with Tran
 
 You can also install the package in editable mode by cloning the repository and using `pip install -e .`.
 
-## DINOv3 vision backbones (optional)
+## Modern Vision Backbones (optional)
 
-RewACT can swap the vision frontend between the default torchvision ResNet feature-map pipeline and **DINOv3** backbones (ViT and ConvNeXt).
+RewACT can swap the default ResNet for **DINOv3** (ViT/ConvNeXt) or **V-JEPA 2**. These models produce high-quality features but can generate many tokens; RewACT uses **Patch Merging** to compress these sequences 4x (e.g., 1200 → 300) to keep transformer compute efficient.
 
-### Install DINOv3 (local repo)
+### Installation (if needed)
+- **DINOv3**: Requires Python >= 3.11. `cd /path/to/dinov3 && pip install -e .`
+- **V-JEPA 2**: `cd /path/to/vjepa2 && pip install -e .`
 
-DINOv3 requires **Python >= 3.11**. After activating your env:
+### Enable in training
+Set the `vision_encoder_type` and provide the variant/weights. Use `use_patch_merge=True` for ViT variants to reduce token count.
 
-```
-cd /path/to/dinov3
-pip install -e .
-```
-
-### Enable DINOv3 in training
-
-Use these policy flags (example: **ViT-B/16**):
-
-```
+**DINOv3 ViT-B Example:**
+```bash
 --policy.vision_encoder_type=dinov3 \
 --policy.dinov3.variant=vitb16 \
---policy.dinov3.weights=/ABS/PATH/TO/dinov3_vitb16_pretrain_*.pth
+--policy.dinov3.weights=/path/to/dino.pth \
+--policy.dinov3.use_patch_merge=True
 ```
 
-Supported `dinov3.variant` values:
-- `vitb16`
-- `vitl16`
-- `convnext_base`
-- `convnext_large`
+**V-JEPA 2 ViT-L Example:**
+```bash
+--policy.vision_encoder_type=vjepa2 \
+--policy.vjepa2.variant=vit_large \
+--policy.vjepa2.weights=/path/to/vjepa2.pt \
+--policy.vjepa2.use_patch_merge=True
+```
 
-Note: `freeze_vision_encoder` defaults to `True`. To finetune the vision backbone, set `--policy.freeze_vision_encoder=false`.
+*Note: `freeze_vision_encoder` defaults to `True`. Even when frozen, RewACT keeps the projection and patch-merging layers trainable.*
 
 ### Smoke test (token shapes)
 
@@ -99,14 +97,15 @@ python scripts/train.py \
 
 To avoid overfitting, I highly recommend evaluating the trained policy using a validation or test dataset in the same training distribution.
 
-```
+```bash
 python scripts/visualise_reward_predictions.py \
 --dataset-repo-id "danaaubakirova/so100_task_2" \
 --episode-id 24 \
---policy-path "outputs/train/so100_test/checkpoints/last/pretrained_model"
+--policy-path "outputs/train/so100_test/checkpoints/last/pretrained_model" \
+--output "outputs/eval_ep24.mp4"
 ```
 
-Note: `scripts/visualise_reward_predictions.py` currently writes to `outputs/reward_visualization.mp4` and will overwrite it between runs (rename/move it if you want to keep multiple outputs).
+Note: `scripts/visualise_reward_predictions.py` defaults to `outputs/reward_visualization.mp4` if `--output` is not provided.
 
 ## What is a reward model?
 

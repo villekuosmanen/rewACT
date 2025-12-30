@@ -20,7 +20,7 @@ RewACT Training Script - Train reward-augmented ACT policies on LeRobot datasets
 Quickstart:
     python scripts/train.py \
         --dataset.repo_id=danaaubakirova/so100_task_2 \
-        --dataset.episodes=[0,1,2,3,4,5,6,7,8,9] \
+        --dataset.episodes=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19] \
         --policy.type=rewact \
         --policy.repo_id=your-hf-user/so100_rewact_resnet \
         --batch_size=8 --steps=1000 --save_freq=500
@@ -28,12 +28,14 @@ Quickstart:
 With DINOv3 backbone:
     python scripts/train.py \
         --dataset.repo_id=danaaubakirova/so100_task_2 \
+        --dataset.episodes=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19] \
         --policy.type=rewact \
         --policy.repo_id=your-hf-user/so100_rewact_dinov3 \
         --batch_size=1 --steps=1000 --save_freq=500 \
         --policy.vision_encoder_type=dinov3 \
         --policy.dinov3.variant=vitb16 \
-        --policy.dinov3.weights=/path/to/dinov3_vitb16.pth
+        --policy.dinov3.weights=/path/to/dinov3_vitb16.pth \
+        --policy.dinov3.use_patch_merge=True
 
 job_name and output_dir default to the model name from policy.repo_id.
 See README.md for all options.

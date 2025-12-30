@@ -7,9 +7,9 @@ Quickstart:
     python scripts/visualise_reward_predictions.py \
         --dataset-repo-id "danaaubakirova/so100_task_2" \
         --episode-id 24 \
-        --policy-path "outputs/train/so100_rewact_resnet/checkpoints/last/pretrained_model"
+        --policy-path "outputs/train/so100_rewact_resnet/checkpoints/last/pretrained_model" \
+        --output "outputs/eval_resnet_ep24.mp4"
 
-Output: outputs/reward_visualization.mp4
 """
 
 import argparse
@@ -91,7 +91,7 @@ def prepare_observation(frame: dict, device: torch.device) -> dict:
     return observation
 
 
-def analyze_episode(dataset: LeRobotDataset, policy, episode_id: int, device: torch.device):
+def analyze_episode(dataset: LeRobotDataset, policy, episode_id: int, device: torch.device, output_path: str):
     """Run policy on an episode and create reward visualization."""
     episode_frames = dataset.hf_dataset.filter(lambda x: x["episode_index"] == episode_id)
     
@@ -101,8 +101,7 @@ def analyze_episode(dataset: LeRobotDataset, policy, episode_id: int, device: to
     print(f"Analyzing episode {episode_id} ({len(episode_frames)} frames)")
     
     reward_data = []
-    output_file = "outputs/reward_visualization.mp4"
-    Path("outputs").mkdir(exist_ok=True)
+    Path(output_path).parent.mkdir(exist_ok=True, parents=True)
     
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
@@ -130,12 +129,12 @@ def analyze_episode(dataset: LeRobotDataset, policy, episode_id: int, device: to
         
         # Create video from frames
         print("Creating video...")
-        create_video_from_frames(temp_path, output_file, fps=dataset.fps)
+        create_video_from_frames(temp_path, output_path, fps=dataset.fps)
     
     # Print stats
     rewards = [r['reward'] for r in reward_data]
     print(f"Reward: mean={np.mean(rewards):.3f}, min={np.min(rewards):.3f}, max={np.max(rewards):.3f}, final={rewards[-1]:.3f}")
-    print(f"Saved: {output_file}")
+    print(f"Saved: {output_path}")
 
 
 def main():
@@ -144,6 +143,7 @@ def main():
     parser.add_argument("--episode-id", type=int, required=True)
     parser.add_argument("--policy-path", type=str, required=True)
     parser.add_argument("--policy-overrides", type=str, nargs="*")
+    parser.add_argument("--output", type=str, default="outputs/reward_visualization.mp4")
     parser.add_argument("--device", type=str, default="cuda")
     args = parser.parse_args()
     
@@ -168,7 +168,7 @@ def main():
     policy.eval()
     policy.to(device)
     
-    analyze_episode(dataset, policy, args.episode_id, device)
+    analyze_episode(dataset, policy, args.episode_id, device, args.output)
 
 
 if __name__ == "__main__":
