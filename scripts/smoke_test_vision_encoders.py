@@ -149,8 +149,8 @@ def main() -> None:
     p.add_argument("--device", type=str, default="cuda")
     p.add_argument("--batch-size", type=int, default=2)
     p.add_argument("--dim-model", type=int, default=512)
-    p.add_argument("--h", type=int, default=224)
-    p.add_argument("--w", type=int, default=224)
+    p.add_argument("--h", type=int, default=480)
+    p.add_argument("--w", type=int, default=640)
     p.add_argument("--num-cameras", type=int, default=2)
     p.add_argument(
         "--dinov3-variant",
