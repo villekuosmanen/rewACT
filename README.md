@@ -10,36 +10,16 @@ You can also install the package in editable mode by cloning the repository and 
 
 ## Modern Vision Backbones (optional)
 
-RewACT can swap the default ResNet for **DINOv3** (ViT/ConvNeXt) or **V-JEPA 2**. These models produce high-quality features but can generate many tokens; RewACT uses **Patch Merging** to compress these sequences 4x (e.g., 1200 → 300) to keep transformer compute efficient.
+RewACT supports **DINOv3** and **V-JEPA 2**. To prevent ViT tokens from stretching attention too thin, RewACT uses **Patch Merging** to compress sequences 4x (for e.g. 1200 → 300). By merging $2x2$ blocks into "super-tokens", it maintains high-frequency detail while keeping the token count manageable for focused attention.
 
 ### Installation (if needed)
 - **DINOv3**: Requires Python >= 3.11. `cd /path/to/dinov3 && pip install -e .`
 - **V-JEPA 2**: `cd /path/to/vjepa2 && pip install -e .`
 
-### Enable in training
-Set the `vision_encoder_type` and provide the variant/weights. Use `use_patch_merge=True` for ViT variants to reduce token count.
-
-**DINOv3 ViT-B Example:**
-```bash
---policy.vision_encoder_type=dinov3 \
---policy.dinov3.variant=vitb16 \
---policy.dinov3.weights=/path/to/dino.pth \
---policy.dinov3.use_patch_merge=True
-```
-
-**V-JEPA 2 ViT-L Example:**
-```bash
---policy.vision_encoder_type=vjepa2 \
---policy.vjepa2.variant=vit_large \
---policy.vjepa2.weights=/path/to/vjepa2.pt \
---policy.vjepa2.use_patch_merge=True
-```
-
-*Note: `freeze_vision_encoder` defaults to `True`. Even when frozen, RewACT keeps the projection and patch-merging layers trainable.*
 
 ### Smoke test (token shapes)
 
-The smoke test instantiates the vision encoder and prints the **number of image tokens** produced per camera at a given resolution. This is useful because self-attention cost scales roughly quadratically with sequence length (about O(S^2) in the number of tokens S), and token count can vary a lot across backbones.
+The smoke test prints the **token count** per camera. This helps monitor the quadratic self-attention cost (O(S^2)), which varies significantly across backbones.
 
 ```
 python scripts/smoke_test_vision_encoders.py \
@@ -69,24 +49,15 @@ python scripts/train.py \
 --steps=10000
 ```
 
-To use a DINOv3 vision backbone, add these flags:
-
-```
-python scripts/train.py \
---dataset.repo_id=danaaubakirova/so100_task_2 \
---dataset.episodes=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19] \
---policy.type=rewact \
---policy.repo_id=<your-hf-user>/so100_dinov3 \
---batch_size=1 \
---eval_freq=-1 \
---log_freq=50 \
---save_freq=500 \
---steps=1000 \
+To use **DINOv3**, add these flags:
+```bash
 --policy.vision_encoder_type=dinov3 \
---policy.dinov3.variant=<vitb16|vitl16|convnext_base|convnext_large> \
---policy.dinov3.weights=/ABS/PATH/TO/<dinov3_checkpoint>.pth \
+--policy.dinov3.variant=vitb16 \
+--policy.dinov3.weights=/path/to/weights.pth \
 --policy.dinov3.use_patch_merge=True
 ```
+
+*(Note: For **V-JEPA 2**, use `vision_encoder_type=vjepa2` and the `vjepa2.*` prefix instead. And never forget to set `use_patch_merge=True`)*
 
 ### Evaluating the trained RewACT policy
 
