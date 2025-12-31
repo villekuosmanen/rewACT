@@ -18,7 +18,7 @@ from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from robocandywrapper import WrappedRobotDataset
 from robocandywrapper.plugins import EpisodeOutcomePlugin
 
-from rewact.plugins import DenseRewardPlugin, PiStar0_6CumulativeRewardPlugin, get_plugin_instance
+from rewact_tools import DenseRewardPlugin, PiStar0_6CumulativeRewardPlugin, get_plugin_instance
 from reward_wrapper import create_reward_visualization_video
 
 

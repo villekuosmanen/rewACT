@@ -24,7 +24,7 @@ import numpy as np
 import torch
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from robocandywrapper import WrappedRobotDataset
-from rewact.plugins import DenseRewardPlugin, get_plugin_instance
+from rewact_tools import DenseRewardPlugin, get_plugin_instance
 
 # Tolerance for exact keypoint matching (very tight for run detection)
 EPSILON = 5e-6

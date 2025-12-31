@@ -18,8 +18,8 @@ from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from robocandywrapper.dataformats.lerobot_21 import LeRobot21Dataset
 
 from reward_wrapper import ACTPolicyWithReward, create_reward_visualization_video
-from rewact.utils import make_rewact_policy
-from rewact.policies.factory import make_pre_post_processors
+from rewact_tools import make_pre_post_processors
+from scripts.utils import make_rewact_policy
 
 
 def none_or_int(value):

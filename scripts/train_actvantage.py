@@ -51,9 +51,9 @@ from robocandywrapper.plugins import EpisodeOutcomePlugin
 from robocandywrapper.samplers import load_sampler_config
 from robocandywrapper import make_dataset
 
-from rewact.plugins import PiStar0_6CumulativeRewardPlugin, ControlModePlugin
-from rewact.utils import make_actvantage_policy
-from rewact.policies.factory import make_pre_post_processors
+from rewact_tools import PiStar0_6CumulativeRewardPlugin, ControlModePlugin
+from rewact_tools import make_pre_post_processors
+from scripts.utils import make_actvantage_policy
 
 
 def update_policy(
@@ -131,7 +131,7 @@ def train(cfg: TrainPipelineConfig):
     torch.backends.cuda.matmul.allow_tf32 = True
 
     logging.info("Creating dataset")
-    from rewact.plugins import PiStar0_6AdvantagePlugin
+    from rewact_tools import PiStar0_6AdvantagePlugin
     
     # For multiple dataset training, provide a mapping of repo_id to advantage directory:
     advantage_dirs = {
