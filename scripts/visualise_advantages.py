@@ -48,7 +48,7 @@ from robocandywrapper.dataformats.lerobot_21 import LeRobot21Dataset
 from robocandywrapper import WrappedRobotDataset
 from robocandywrapper.plugins import EpisodeOutcomePlugin
 
-from rewact.plugins import PiStar0_6CumulativeRewardPlugin, PiStar0_6AdvantagePlugin, ControlModePlugin
+from rewact_tools import PiStar0_6CumulativeRewardPlugin, PiStar0_6AdvantagePlugin, ControlModePlugin
 from reward_wrapper import create_advantage_visualization_video
 
 

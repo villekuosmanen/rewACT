@@ -21,9 +21,9 @@ from robocandywrapper.dataformats.lerobot_21 import LeRobot21Dataset
 from robocandywrapper import WrappedRobotDataset
 from robocandywrapper.plugins import EpisodeOutcomePlugin
 
-from rewact.plugins import PiStar0_6CumulativeRewardPlugin
-from rewact.policies.rewact import RewACTPolicy
-from rewact.policies.factory import make_pre_post_processors
+from rewact_tools import PiStar0_6CumulativeRewardPlugin
+from rewact_tools import make_pre_post_processors
+from lerobot_policy_rewact import RewACTPolicy
 
 
 def smooth_values(values: list[float], window_size: int) -> list[float]:
