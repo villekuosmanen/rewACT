@@ -47,14 +47,13 @@ class RewACTPolicy(PreTrainedPolicy):
     def __init__(
         self,
         config: RewACTConfig,
-        dataset_stats: dict[str, dict[str, Tensor]] | None = None,
+        **kwargs,
     ):
         """
         Args:
             config: Policy configuration class instance or None, in which case the default instantiation of
                     the configuration class is used.
-            dataset_stats: Dataset statistics to be used for normalization. If not passed here, it is expected
-                that they will be passed with a call to `load_state_dict` before the policy is used.
+            kwargs: unused.
         """
         super().__init__(config)
         config.validate_features()
@@ -138,6 +137,7 @@ class RewACTPolicy(PreTrainedPolicy):
             reward_pred = torch.clamp(reward_pred, 0.0, 1.0)
             return action, reward_pred
 
+        current_reward_pred = 0.0
         # Action queue logic for n_action_steps > 1
         if len(self._action_queue) == 0:
             actions, reward_output = self.predict_action_chunk(batch)
