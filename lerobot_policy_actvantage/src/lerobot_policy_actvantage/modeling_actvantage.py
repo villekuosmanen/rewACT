@@ -49,14 +49,13 @@ class ACTvantagePolicy(PreTrainedPolicy):
     def __init__(
         self,
         config: ACTvantageConfig,
-        dataset_stats: dict[str, dict[str, Tensor]] | None = None,
+        **kwargs,
     ):
         """
         Args:
             config: Policy configuration class instance or None, in which case the default instantiation of
                     the configuration class is used.
-            dataset_stats: Dataset statistics to be used for normalization. If not passed here, it is expected
-                that they will be passed with a call to `load_state_dict` before the policy is used.
+            kwargs: unused.
         """
         super().__init__(config)
         config.validate_features()
