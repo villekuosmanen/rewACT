@@ -8,7 +8,7 @@ showing the interpolated rewards between keypoints.
 
 import argparse
 import os
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import numpy as np
 import torch
@@ -16,8 +16,9 @@ from tqdm import tqdm
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from robocandywrapper import WrappedRobotDataset
+from robocandywrapper.plugins import EpisodeOutcomePlugin
 
-from rewact import RewardPlugin, RewardPluginInstance, get_plugin_instance
+from rewact_tools import DenseRewardPlugin, PiStar0_6CumulativeRewardPlugin, get_plugin_instance
 from reward_wrapper import create_reward_visualization_video
 
 
@@ -50,7 +51,6 @@ def extract_images_from_frame(frame: dict) -> List[torch.Tensor]:
 
 def analyze_episode_rewards(
     reward_dataset: WrappedRobotDataset,
-    reward_plugin: RewardPluginInstance,
     episode_id: int,
     output_dir: str = "outputs"
 ) -> Dict:
@@ -67,21 +67,22 @@ def analyze_episode_rewards(
         Dictionary containing analysis results
     """
     
-    # Get episode information from base dataset
-    base_dataset = reward_dataset._datasets[0]
-    episode_length = base_dataset.meta.episodes[episode_id]["length"]
-    episode_start_idx = base_dataset.episode_data_index["from"][episode_id].item()
+    # Get episode information
+    episode_length = reward_dataset._datasets[0].meta.episodes[episode_id]["length"]
+    episode_start_idx = reward_dataset._datasets[0].episode_data_index["from"][episode_id].item()
     
     print(f"Analyzing episode {episode_id} with {episode_length} frames")
     
     # Check if episode has keypoint rewards
-    keypoints = reward_plugin.get_episode_keypoints(episode_id)
-    
-    if keypoints:
-        print(f"Episode has {len(keypoints)} reward keypoints:")
-        for frame_idx, reward in sorted(keypoints.items()):
-            print(f"  Frame {frame_idx}: {reward:.3f}")
-    else:
+    keypoints = None
+    try:
+        keypoints = reward_dataset.get_episode_keypoints(episode_id)
+        
+        if keypoints:
+            print(f"Episode has {len(keypoints)} reward keypoints:")
+            for frame_idx, reward in sorted(keypoints.items()):
+                print(f"  Frame {frame_idx}: {reward:.3f}")
+    except Exception as e:
         print("Episode has no keypoint rewards - using fallback linear interpolation")
     
     # Collect reward data and images
@@ -117,7 +118,7 @@ def analyze_episode_rewards(
         reward_images, 
         reward_data, 
         output_filename, 
-        fps=base_dataset.fps
+        fps=reward_dataset.fps
     )
     
     # Calculate statistics
@@ -126,8 +127,8 @@ def analyze_episode_rewards(
     stats = {
         'episode_id': episode_id,
         'episode_length': episode_length,
-        'num_keypoints': len(keypoints),
-        'keypoints': keypoints,
+        'num_keypoints': len(keypoints) if keypoints else 0,
+        'keypoints': keypoints if keypoints else [],
         'mean_reward': float(np.mean(rewards)),
         'std_reward': float(np.std(rewards)),
         'min_reward': float(np.min(rewards)),
@@ -150,16 +151,21 @@ def analyze_episode_rewards(
 
 def visualize_keypoint_progression(
     reward_dataset: WrappedRobotDataset,
-    reward_plugin: RewardPluginInstance,
+    reward_plugin: Any,
     episode_id: int,
     output_dir: str = "outputs"
 ):
     """
     Create a detailed analysis of how rewards progress through keypoints.
     """
-    keypoints = reward_plugin.get_episode_keypoints(episode_id)
-    base_dataset = reward_dataset._datasets[0]
-    episode_length = base_dataset.meta.episodes[episode_id]["length"]
+    keypoints = None
+    try:
+        keypoints = reward_dataset.get_episode_keypoints(episode_id)
+    except Exception as e:
+        print(f"Error getting episode keypoints: {e}")
+        return
+    
+    episode_length = reward_dataset._datasets[0].meta.episodes[episode_id]["length"]
     
     if not keypoints:
         print(f"Episode {episode_id} has no keypoints to analyze")
@@ -190,7 +196,7 @@ def visualize_keypoint_progression(
     
     # Show interpolated reward curve
     print(f"\nInterpolated reward progression (every 10 frames):")
-    episode_start_idx = base_dataset.episode_data_index["from"][episode_id].item()
+    episode_start_idx = reward_dataset._datasets[0].episode_data_index["from"][episode_id].item()
     
     for frame_idx in range(0, episode_length, 10):
         global_idx = episode_start_idx + frame_idx
@@ -206,14 +212,13 @@ def visualize_keypoint_progression(
 
 def add_example_keypoints(
     reward_dataset: WrappedRobotDataset, 
-    reward_plugin: RewardPluginInstance,
+    reward_plugin: Any,
     episode_id: int
 ):
     """
     Add example keypoints to an episode for demonstration purposes.
     """
-    base_dataset = reward_dataset._datasets[0]
-    episode_length = base_dataset.meta.episodes[episode_id]["length"]
+    episode_length = reward_dataset._datasets[0].meta.episodes[episode_id]["length"]
     
     print(f"Adding example keypoints to episode {episode_id} (length: {episode_length})...")
     
@@ -264,14 +269,16 @@ def main():
     print(f"Dataset loaded successfully. Total episodes: {base_dataset.num_episodes}")
     
     # Wrap with reward plugin
-    reward_plugin_obj = RewardPlugin(
-        reward_start_pct=args.reward_start_pct,
-        reward_end_pct=args.reward_end_pct
-    )
-    reward_dataset = WrappedRobotDataset(base_dataset, plugins=[reward_plugin_obj])
+    # reward_plugin_obj = DenseRewardPlugin(
+    #     reward_start_pct=args.reward_start_pct,
+    #     reward_end_pct=args.reward_end_pct
+    # )
+    reward_plugin_obj = PiStar0_6CumulativeRewardPlugin(normalise=True)
+    reward_dataset = WrappedRobotDataset(base_dataset, plugins=[EpisodeOutcomePlugin(), reward_plugin_obj])
     
     # Get the reward plugin instance
-    reward_plugin_instance = get_plugin_instance(reward_dataset, RewardPlugin, dataset_idx=0)
+    reward_plugin_instance = get_plugin_instance(reward_dataset, PiStar0_6CumulativeRewardPlugin, dataset_idx=0)
+    # reward_plugin_instance = get_plugin_instance(reward_dataset, DenseRewardPlugin, dataset_idx=0)
     if reward_plugin_instance is None:
         raise RuntimeError("Could not get reward plugin instance")
     

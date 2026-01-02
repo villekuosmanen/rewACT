@@ -14,12 +14,12 @@ import torch
 from scipy.interpolate import CubicSpline, interp1d
 from robocandywrapper import DatasetPlugin, PluginInstance
 
-from rewact.dataset_with_reward import KeypointReward
+from .dataset_with_reward import KeypointReward
 
 
-class RewardPluginInstance(PluginInstance):
+class DenseRewardPluginInstance(PluginInstance):
     """
-    Plugin instance that adds reward calculation to a dataset.
+    Plugin instance that adds dense reward calculation to a dataset.
     
     Supports keypoint-based interpolation with smooth curves between keypoints.
     """
@@ -41,16 +41,55 @@ class RewardPluginInstance(PluginInstance):
         # Load keypoint rewards if they exist
         self.keypoint_rewards = self._load_keypoint_rewards()
         self._episode_reward_cache = {}
+        
+        # Create mapping from episode_idx to position in episode_data_index
+        # This is needed when using a subset of episodes
+        if hasattr(dataset, 'episodes') and dataset.episodes is not None:
+            self._episode_idx_to_pos = {ep_idx: pos for pos, ep_idx in enumerate(dataset.episodes)}
+        else:
+            # No subsetting, episode_idx == position
+            self._episode_idx_to_pos = None
     
     def get_data_keys(self) -> list[str]:
         """Return the keys this plugin will add to items."""
         return ["reward", "use_action_mask"]
     
-    def get_item_data(self, idx: int, episode_idx: int) -> dict[str, Any]:
+    def _get_episode_data_index_pos(self, episode_idx: int) -> int:
+        """
+        Get the position in episode_data_index for a given episode_idx.
+        
+        When using a subset of episodes, episode_idx (the actual episode number)
+        needs to be mapped to its position in the filtered episode_data_index.
+        
+        Args:
+            episode_idx: The actual episode number from the dataset
+            
+        Returns:
+            Position to use for indexing into episode_data_index
+        """
+        if self._episode_idx_to_pos is not None:
+            if episode_idx not in self._episode_idx_to_pos:
+                raise ValueError(
+                    f"Episode {episode_idx} not found in the subset of episodes being used. "
+                    f"Available episodes: {list(self._episode_idx_to_pos.keys())}"
+                )
+            return self._episode_idx_to_pos[episode_idx]
+        else:
+            # No subsetting, episode_idx is the position
+            return episode_idx
+    
+    def get_item_data(
+        self,
+        idx: int,
+        episode_idx: int,
+        accumulated_data: Optional[Dict[str, Any]] = None
+    ) -> dict[str, Any]:
         """Get reward data for a specific item."""
         # Get episode information
         episode_length = self.dataset.meta.episodes[episode_idx]["length"]
-        ep_start = self.dataset.episode_data_index["from"][episode_idx]
+        # Map episode_idx to position in episode_data_index (needed for episode subsets)
+        ep_pos = self._get_episode_data_index_pos(episode_idx)
+        ep_start = self.dataset.episode_data_index["from"][ep_pos]
         
         # Calculate frame index within episode
         # Note: idx is local to the dataset, not global
@@ -448,23 +487,23 @@ class RewardPluginInstance(PluginInstance):
                             rewards[j] = start_reward + t * (end_reward - start_reward)
         
         rewards = np.clip(rewards, 0.0, 1.0)
-        return rewards.tolist()
+        return rewards.tolist(        )
 
 
-class RewardPlugin(DatasetPlugin):
+class DenseRewardPlugin(DatasetPlugin):
     """
-    Plugin that adds reward calculation to LeRobotDatasets.
+    Plugin that adds dense reward calculation to LeRobotDatasets.
     
     Supports keypoint-based interpolation with smooth curves.
     
     Example:
         ```python
         from robocandywrapper import WrappedRobotDataset
-        from rewact.reward_plugin import RewardPlugin
+        from rewact_tools.reward_plugin import DenseRewardPlugin
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
         
         # Create plugin
-        reward_plugin = RewardPlugin(reward_start_pct=0.05, reward_end_pct=0.95)
+        reward_plugin = DenseRewardPlugin(reward_start_pct=0.05, reward_end_pct=0.95)
         
         # Load dataset with plugin
         base_dataset = LeRobotDataset("my_dataset")
@@ -502,9 +541,9 @@ class RewardPlugin(DatasetPlugin):
         self.mask_actions_for_eval_data = mask_actions_for_eval_data
         self.mask_actions_for_fail_data = mask_actions_for_fail_data
     
-    def attach(self, dataset) -> RewardPluginInstance:
+    def attach(self, dataset) -> DenseRewardPluginInstance:
         """Create a dataset-specific plugin instance."""
-        return RewardPluginInstance(
+        return DenseRewardPluginInstance(
             dataset,
             reward_start_pct=self.reward_start_pct,
             reward_end_pct=self.reward_end_pct,

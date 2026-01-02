@@ -13,7 +13,7 @@ from typing import Dict, List
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from robocandywrapper import WrappedRobotDataset
 
-from rewact import RewardPlugin, RewardPluginInstance, KeypointReward, get_plugin_instance
+from rewact_tools import DenseRewardPlugin as RewardPlugin, DenseRewardPluginInstance as RewardPluginInstance, KeypointReward, get_plugin_instance
 
 
 def load_reward_config(config_path: str) -> Dict:

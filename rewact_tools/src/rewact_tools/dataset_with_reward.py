@@ -69,7 +69,7 @@ class LeRobotDatasetWithReward:
         reward_dataset = LeRobotDatasetWithReward(dataset)
         
         # Method 1: Add keypoint rewards using KeypointReward objects (preferred)
-        from rewact.dataset_with_reward import KeypointReward
+        # KeypointReward is defined in this same file above
         
         keypoints = [
             KeypointReward(reward=0.0, frame_index=5),      # Start at frame 5

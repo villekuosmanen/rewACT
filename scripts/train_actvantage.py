@@ -16,10 +16,10 @@
 import logging
 import time
 from contextlib import nullcontext
+from pathlib import Path
 from pprint import pformat
 from typing import Any
 
-import numpy as np
 import torch
 from termcolor import colored
 from torch.amp import GradScaler
@@ -53,7 +53,8 @@ from robocandywrapper import make_dataset
 
 from rewact_tools import PiStar0_6CumulativeRewardPlugin, ControlModePlugin
 from rewact_tools import make_pre_post_processors
-from scripts.utils import make_rewact_policy
+from scripts.utils import make_actvantage_policy
+
 
 def update_policy(
     train_metrics: MetricsTracker,
@@ -121,10 +122,7 @@ def train(cfg: TrainPipelineConfig):
     if cfg.seed is not None:
         set_seed(cfg.seed)
 
-    # Force pyav video decoding to avoid issues with torchcodec and GPU-accelerated video decoding in the cloud.
-    # cfg.dataset.video_backend = "pyav"
-
-    sampler_config = load_sampler_config("scripts/configs/sampler_rewact.json")
+    sampler_config = load_sampler_config("scripts/configs/sampler_actvantage.json")
     cfg.dataset.episodes = sampler_config.episodes
 
     # Check device is available
@@ -133,7 +131,34 @@ def train(cfg: TrainPipelineConfig):
     torch.backends.cuda.matmul.allow_tf32 = True
 
     logging.info("Creating dataset")
-    dataset = make_dataset(cfg, plugins=[EpisodeOutcomePlugin(), ControlModePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True)])
+    from rewact_tools import PiStar0_6AdvantagePlugin
+    
+    # For multiple dataset training, provide a mapping of repo_id to advantage directory:
+    advantage_dirs = {
+        "villekuosmanen/build_block_tower": Path("outputs/build_block_tower-advantages"),
+        "villekuosmanen/dAgger_build_block_tower_1.0.0": Path("outputs/dAgger_build_block_tower_1.0.0-advantages"),
+        "villekuosmanen/dAgger_build_block_tower_1.1.0": Path("outputs/dAgger_build_block_tower_1.1.0-advantages"),
+        "villekuosmanen/dAgger_build_block_tower_1.2.0": Path("outputs/dAgger_build_block_tower_1.2.0-advantages"),
+        "villekuosmanen/dAgger_build_block_tower_1.3.0": Path("outputs/dAgger_build_block_tower_1.3.0-advantages"),
+        "villekuosmanen/dAgger_build_block_tower_1.4.0": Path("outputs/dAgger_build_block_tower_1.4.0-advantages"),
+    }
+    
+    # Validate all directories exist
+    missing_dirs = [repo_id for repo_id, path in advantage_dirs.items() if not path.exists()]
+    if missing_dirs:
+        logging.warning(
+            f"Advantage directories not found for datasets: {missing_dirs}. "
+            "Please run precompute_advantage.py first for each dataset"
+        )
+        raise FileNotFoundError(f"Missing advantage directories for: {missing_dirs}")
+    
+    advantage_plugin = PiStar0_6AdvantagePlugin(
+        advantage_file=advantage_dirs,  # Now accepts dict for multiple datasets
+        use_percentile_threshold=True,
+        percentile=55.0,  # Can be configured
+    )
+    dataset = make_dataset(cfg, plugins=[EpisodeOutcomePlugin(), ControlModePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True), advantage_plugin])
+    import numpy as np
     dataset.meta.features['observation.eef_6d_pose']= {
         'dtype': "float32",
         'shape': (7,),
@@ -145,8 +170,8 @@ def train(cfg: TrainPipelineConfig):
             dataset.meta.stats['observation.state'][stat_key][-1:]
         ])
 
-    logging.info("Creating policy")
-    policy = make_rewact_policy(cfg.policy, dataset.meta)
+    logging.info("Creating policy")    
+    policy = make_actvantage_policy(cfg.policy, dataset.meta)
 
     # Create processors - only provide dataset_stats if not resuming from saved processors
     processor_kwargs = {}
@@ -155,7 +180,6 @@ def train(cfg: TrainPipelineConfig):
         # Only provide dataset_stats when not resuming from saved processor state
         processor_kwargs["dataset_stats"] = dataset.meta.stats
 
-    # TODO: make sure it handles plugin features
     if cfg.policy.pretrained_path is not None:
         processor_kwargs["preprocessor_overrides"] = {
             "device_processor": {"device": device.type},
@@ -202,21 +226,6 @@ def train(cfg: TrainPipelineConfig):
     logging.info(f"{num_learnable_params=} ({format_big_number(num_learnable_params)})")
     logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
 
-    # Benchmarking data loading performance
-    # Test single batch load speed
-    import time
-    test_dataset = dataset
-    print(f"Dataset length: {len(test_dataset)}")
-    start = time.perf_counter()
-    sample = test_dataset[0]
-    print(f"Single sample load: {time.perf_counter() - start:.3f}s")
-    start = time.perf_counter()
-    sample = test_dataset[0]
-    print(f"Same sample load twice: {time.perf_counter() - start:.3f}s")
-    start = time.perf_counter()
-    sample = test_dataset[1000]
-    print(f"Second sample load: {time.perf_counter() - start:.3f}s")
-
     # create dataloader for offline training
     if hasattr(cfg.policy, "drop_n_last_frames"):
         shuffle = False
@@ -235,8 +244,11 @@ def train(cfg: TrainPipelineConfig):
         batch_size=cfg.batch_size,
         shuffle=shuffle,
         sampler=sampler,
-        pin_memory=device.type == "cuda",
+        pin_memory=True,
+        prefetch_factor=2,
+        persistent_workers=True,
         drop_last=False,
+        multiprocessing_context='spawn',
     )
     dl_iter = cycle(dataloader)
 
@@ -276,6 +288,8 @@ def train(cfg: TrainPipelineConfig):
             use_amp=cfg.policy.use_amp,
         )
 
+        # Note: eval and checkpoint happens *after* the `step`th training update has completed, so we
+        # increment `step` here.
         step += 1
         train_tracker.step()
         is_log_step = cfg.log_freq > 0 and step % cfg.log_freq == 0

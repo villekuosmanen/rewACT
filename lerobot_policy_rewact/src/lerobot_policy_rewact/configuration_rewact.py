@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 from dataclasses import dataclass, field
 
 from lerobot.configs.policies import PreTrainedConfig
@@ -22,5 +21,9 @@ from lerobot.policies.act.configuration_act import ACTConfig
 @dataclass
 class RewACTConfig(ACTConfig):
     # Reward prediction head
-    use_reward_head: bool = True
-    reward_loss_weight: float = 2.0
+    use_reward_head: bool = True # Deprecated - unused
+    reward_loss_weight: float = 0.1
+    num_value_bins: int = 100  # Number of bins for distributional value function
+    value_min: int = 0
+    value_max: int = 1
+

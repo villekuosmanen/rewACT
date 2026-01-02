@@ -24,7 +24,7 @@ import numpy as np
 import torch
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from robocandywrapper import WrappedRobotDataset
-from rewact import RewardPlugin, get_plugin_instance
+from rewact_tools import DenseRewardPlugin, get_plugin_instance
 
 # Tolerance for exact keypoint matching (very tight for run detection)
 EPSILON = 5e-6
@@ -346,9 +346,9 @@ def migrate_dataset_rewards(
         print("\n3. Saving keypoints to rewact_extensions/reward_keypoints.json...")
     
     # Wrap dataset with plugin to save keypoints
-    reward_plugin_obj = RewardPlugin()
+    reward_plugin_obj = DenseRewardPlugin()
     wrapped_dataset = WrappedRobotDataset(base_dataset, plugins=[reward_plugin_obj])
-    reward_plugin = get_plugin_instance(wrapped_dataset, RewardPlugin, dataset_idx=0)
+    reward_plugin = get_plugin_instance(wrapped_dataset, DenseRewardPlugin, dataset_idx=0)
     
     # Add keypoints for each episode
     for episode_idx, keypoints in all_keypoints.items():

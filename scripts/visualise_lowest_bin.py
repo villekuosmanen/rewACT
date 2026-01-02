@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
 """
-Script to analyze policy behavior on dataset episodes.
-Runs policy inference on episodes and analyzes proprioceptive feature importance.
-By default, analyzes all episodes in the dataset.
+Script to visualize the lowest bin value from cross-entropy reward predictions.
+Analyzes policy behavior on dataset episodes and visualizes the probability
+assigned to the lowest reward bin.
 """
 
 import argparse
@@ -130,7 +130,7 @@ def analyze_episode(
     model_dtype: torch.dtype = torch.float32
 ) -> Dict:
     """
-    Run policy inference on an episode and analyze proprioceptive importance.
+    Run policy inference on an episode and extract lowest bin values.
     
     Returns:
         Dictionary containing analysis results
@@ -145,8 +145,8 @@ def analyze_episode(
     
     print(f"Analyzing episode {episode_id} with {episode_length} frames")
     
-    # Initialize reward tracking for ACTPolicyWithReward
-    reward_data = []
+    # Initialize tracking for lowest bin values
+    lowest_bin_data = []
     reward_images = []
     
     # Debug policy configuration
@@ -174,6 +174,8 @@ def analyze_episode(
             
         print(f"Env state feature: {getattr(policy.config, 'env_state_feature', 'None')}")
         print(f"Chunk size: {getattr(policy.config, 'chunk_size', 'None')}")
+        print(f"Number of value bins: {getattr(policy.config, 'num_value_bins', 'None')}")
+        print(f"Value range: [{getattr(policy.config, 'value_min', 'None')}, {getattr(policy.config, 'value_max', 'None')}]")
         print("=" * 30)
     
     # Process each frame
@@ -187,44 +189,65 @@ def analyze_episode(
         # Run policy inference
         with torch.inference_mode():
             batch = preprocessor(observation)
-            reward = policy.get_reward_pred(batch)
-
-            reward_data.append({
+            
+            # Get reward distribution from the policy
+            _, reward_output = policy.predict_action_chunk(batch)
+            
+            # Extract the probability distribution over bins
+            reward_dist = reward_output['distribution']  # (B, num_bins)
+            
+            # Get the probability assigned to the lowest bin (bin 0)
+            lowest_bin_prob = reward_dist[0, 0].cpu().item()
+            
+            # Also get the logit for comparison
+            reward_logits = reward_output['logits']  # (B, num_bins)
+            lowest_bin_logit = reward_logits[0, 0].cpu().item()
+            
+            lowest_bin_data.append({
                 'step': timestamp_counter,
-                'reward': reward.cpu().item()
+                'reward': lowest_bin_prob,  # Use probability for visualization
+                'logit': lowest_bin_logit,   # Store logit for analysis
             })
             
-            # Extract images for reward visualization
+            # Extract images for visualization
             reward_images_step = []
             for key in observation:
                 if "image" in key:
-                    # Convert back to original format for reward visualization
+                    # Convert back to original format for visualization
                     img = observation[key].squeeze(0)  # Remove batch dim
                     img = img * 255  # Convert back to 0-255 range
                     img = img.permute(1, 2, 0)  # Convert from CHW to HWC
                     reward_images_step.append(img.cpu())
             reward_images.append(reward_images_step)                    
                 
-        timestamp_counter +=1
+        timestamp_counter += 1
         
-    if reward_data and reward_images:
-        output_filename_reward = f"outputs/reward_visualization.mp4"
-        create_reward_visualization_video(reward_images, reward_data, output_filename_reward, fps=dataset.fps)
+    if lowest_bin_data and reward_images:
+        output_filename = f"outputs/lowest_bin_visualization.mp4"
+        create_reward_visualization_video(reward_images, lowest_bin_data, output_filename, fps=dataset.fps, text="Failure Probability")
         
-        # Print reward statistics
-        rewards = [r['reward'] for r in reward_data]
-        print(f"Reward Statistics:")
-        print(f"  Mean: {np.mean(rewards):.3f}")
-        print(f"  Std: {np.std(rewards):.3f}")
-        print(f"  Min: {np.min(rewards):.3f}")
-        print(f"  Max: {np.max(rewards):.3f}")
-        print(f"  Final: {rewards[-1]:.3f}")
+        # Print statistics for lowest bin probabilities
+        probs = [r['reward'] for r in lowest_bin_data]
+        logits = [r['logit'] for r in lowest_bin_data]
+        print(f"\nLowest Bin Probability Statistics:")
+        print(f"  Mean: {np.mean(probs):.4f}")
+        print(f"  Std: {np.std(probs):.4f}")
+        print(f"  Min: {np.min(probs):.4f}")
+        print(f"  Max: {np.max(probs):.4f}")
+        print(f"  Final: {probs[-1]:.4f}")
+        
+        print(f"\nLowest Bin Logit Statistics:")
+        print(f"  Mean: {np.mean(logits):.4f}")
+        print(f"  Std: {np.std(logits):.4f}")
+        print(f"  Min: {np.min(logits):.4f}")
+        print(f"  Max: {np.max(logits):.4f}")
+        print(f"  Final: {logits[-1]:.4f}")
 
-    print("Video encoding process finished.")
+    print("\nVideo encoding process finished.")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Analyze policy behavior on dataset episodes")
+    parser = argparse.ArgumentParser(description="Visualize lowest bin values from reward predictions")
     parser.add_argument("--dataset-repo-id", type=str, required=True,
                         help="Repository ID of the dataset to analyze")
     parser.add_argument("--episode-id", type=int, default=None,
@@ -272,7 +295,6 @@ def main():
     
     # Load policy
     print("Loading policy...")
-    # TODO this currently will not work
     policy, _, preprocessor, postprocessor = load_policy(
         args.policy_path,
         dataset,
@@ -303,3 +325,4 @@ def main():
             
 if __name__ == "__main__":
     main()
+
