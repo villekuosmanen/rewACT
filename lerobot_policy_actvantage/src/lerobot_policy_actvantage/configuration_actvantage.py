@@ -23,3 +23,4 @@ class ACTvantageConfig(ACTConfig):
     advantage_dropout_prob: float = 0.3
     value_min: int = 0
     value_max: int = 1
+

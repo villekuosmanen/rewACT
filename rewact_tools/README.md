@@ -40,3 +40,4 @@ from rewact_tools import DenseRewardPlugin, KeypointReward, make_pre_post_proces
 # Use KeypointReward for defining reward keypoints
 ```
 
+

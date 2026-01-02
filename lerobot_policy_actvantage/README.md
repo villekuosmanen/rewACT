@@ -37,3 +37,4 @@ ACTvantage is an advantage-conditioned policy that extends ACT (Action Chunking 
 - Minimal dependencies (only lerobot >= 0.4 required)
 - Full integration with LeRobot's training pipeline
 
+

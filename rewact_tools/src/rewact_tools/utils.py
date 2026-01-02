@@ -51,3 +51,4 @@ def _extract_complementary_data(batch: dict[str, Any], plugin_features: dict[str
 
     complementary_data = {**pad_keys, **task_key, **index_key, **task_index_key, **plugin_features_key}
     return complementary_data if complementary_data else None
+

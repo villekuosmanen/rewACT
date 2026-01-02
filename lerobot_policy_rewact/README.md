@@ -42,3 +42,4 @@ The reward model predicts dense rewards for robotic actions, providing feedback 
 - Minimal dependencies (only lerobot >= 0.4 required)
 - Full integration with LeRobot's training pipeline
 
+
