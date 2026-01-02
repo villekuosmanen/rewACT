@@ -26,4 +26,3 @@ class RewACTConfig(ACTConfig):
     num_value_bins: int = 100  # Number of bins for distributional value function
     value_min: int = 0
     value_max: int = 1
-

@@ -529,4 +529,3 @@ class RewACT(nn.Module):
         }
 
         return actions, reward_output, (mu, log_sigma_x2)
-

@@ -276,6 +276,3 @@ class ControlModePlugin(DatasetPlugin):
                 "All control modes will default to 'unknown'."
             )
             return {}
-
-
-
