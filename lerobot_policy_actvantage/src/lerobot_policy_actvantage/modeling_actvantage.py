@@ -440,3 +440,4 @@ class ACTvantage(nn.Module):
         actions = self.action_head(decoder_out)
 
         return actions, (mu, log_sigma_x2)
+
