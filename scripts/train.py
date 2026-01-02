@@ -26,7 +26,6 @@ from torch.optim import Optimizer
 
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.datasets.factory import make_dataset
 from lerobot.datasets.sampler import EpisodeAwareSampler
 from lerobot.datasets.utils import cycle
 from lerobot.envs.factory import make_env
@@ -49,9 +48,9 @@ from lerobot.utils.utils import (
     has_method,
     init_logging,
 )
-from lerobot.utils.wandb_utils import WandBLogger
+from robocandywrapper import WrappedRobotDataset, make_dataset
 
-from rewact import LeRobotDatasetWithReward
+from rewact import RewardPlugin, WandBLogger
 from rewact.utils import make_rewact_policy
 
 def update_policy(
@@ -126,9 +125,14 @@ def train(cfg: TrainPipelineConfig):
     torch.backends.cuda.matmul.allow_tf32 = True
 
     logging.info("Creating dataset")
-    dataset = make_dataset(cfg)
-    dataset = LeRobotDatasetWithReward(dataset=dataset)
-
+    reward_plugin = RewardPlugin(
+        reward_start_pct=0.05,
+        reward_end_pct=0.95,
+        mask_actions_for_eval_data=True,
+        mask_actions_for_fail_data=True,
+    )
+    dataset = make_dataset(cfg, plugins=[reward_plugin])
+    
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,
     # using the eval.py instead, with gym_dora environment and dora-rs.
@@ -285,6 +289,12 @@ def train(cfg: TrainPipelineConfig):
     logging.info("End of training")
 
     if cfg.policy.push_to_hub:
+        # Format datasets properly for YAML frontmatter
+        if cfg.dataset.repo_id.startswith('[') and cfg.dataset.repo_id.endswith(']'):
+            # Handle multiple datasets: "[dataset1, dataset2]" -> ["dataset1", "dataset2"]
+            datasets_str = cfg.dataset.repo_id.strip('[]')
+            datasets = [ds.strip() for ds in datasets_str.split(',')]
+            cfg.dataset.repo_id = datasets
         policy.push_model_to_hub(cfg)
 
 

@@ -15,8 +15,9 @@ import torch
 from tqdm import tqdm
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from robocandywrapper import WrappedRobotDataset
 
-from rewact.dataset_with_reward import LeRobotDatasetWithReward
+from rewact import RewardPlugin, RewardPluginInstance, get_plugin_instance
 from reward_wrapper import create_reward_visualization_video
 
 
@@ -48,7 +49,8 @@ def extract_images_from_frame(frame: dict) -> List[torch.Tensor]:
 
 
 def analyze_episode_rewards(
-    reward_dataset: LeRobotDatasetWithReward,
+    reward_dataset: WrappedRobotDataset,
+    reward_plugin: RewardPluginInstance,
     episode_id: int,
     output_dir: str = "outputs"
 ) -> Dict:
@@ -56,7 +58,8 @@ def analyze_episode_rewards(
     Analyze reward labels for an episode and create visualization.
     
     Args:
-        reward_dataset: LeRobotDatasetWithReward instance
+        reward_dataset: WrappedRobotDataset instance
+        reward_plugin: RewardPluginInstance to get keypoints from
         episode_id: Episode ID to analyze
         output_dir: Directory to save output videos
         
@@ -64,14 +67,15 @@ def analyze_episode_rewards(
         Dictionary containing analysis results
     """
     
-    # Get episode information
-    episode_length = reward_dataset._dataset.meta.episodes[episode_id]["length"]
-    episode_start_idx = reward_dataset._dataset.episode_data_index["from"][episode_id].item()
+    # Get episode information from base dataset
+    base_dataset = reward_dataset._datasets[0]
+    episode_length = base_dataset.meta.episodes[episode_id]["length"]
+    episode_start_idx = base_dataset.episode_data_index["from"][episode_id].item()
     
     print(f"Analyzing episode {episode_id} with {episode_length} frames")
     
     # Check if episode has keypoint rewards
-    keypoints = reward_dataset.get_episode_keypoints(episode_id)
+    keypoints = reward_plugin.get_episode_keypoints(episode_id)
     
     if keypoints:
         print(f"Episode has {len(keypoints)} reward keypoints:")
@@ -113,7 +117,7 @@ def analyze_episode_rewards(
         reward_images, 
         reward_data, 
         output_filename, 
-        fps=reward_dataset._dataset.fps
+        fps=base_dataset.fps
     )
     
     # Calculate statistics
@@ -145,15 +149,17 @@ def analyze_episode_rewards(
 
 
 def visualize_keypoint_progression(
-    reward_dataset: LeRobotDatasetWithReward,
+    reward_dataset: WrappedRobotDataset,
+    reward_plugin: RewardPluginInstance,
     episode_id: int,
     output_dir: str = "outputs"
 ):
     """
     Create a detailed analysis of how rewards progress through keypoints.
     """
-    keypoints = reward_dataset.get_episode_keypoints(episode_id)
-    episode_length = reward_dataset._dataset.meta.episodes[episode_id]["length"]
+    keypoints = reward_plugin.get_episode_keypoints(episode_id)
+    base_dataset = reward_dataset._datasets[0]
+    episode_length = base_dataset.meta.episodes[episode_id]["length"]
     
     if not keypoints:
         print(f"Episode {episode_id} has no keypoints to analyze")
@@ -184,7 +190,7 @@ def visualize_keypoint_progression(
     
     # Show interpolated reward curve
     print(f"\nInterpolated reward progression (every 10 frames):")
-    episode_start_idx = reward_dataset._dataset.episode_data_index["from"][episode_id].item()
+    episode_start_idx = base_dataset.episode_data_index["from"][episode_id].item()
     
     for frame_idx in range(0, episode_length, 10):
         global_idx = episode_start_idx + frame_idx
@@ -198,11 +204,16 @@ def visualize_keypoint_progression(
         print(f"  Frame {frame_idx:3d}: {reward_value:.3f}{marker}")
 
 
-def add_example_keypoints(reward_dataset: LeRobotDatasetWithReward, episode_id: int):
+def add_example_keypoints(
+    reward_dataset: WrappedRobotDataset, 
+    reward_plugin: RewardPluginInstance,
+    episode_id: int
+):
     """
     Add example keypoints to an episode for demonstration purposes.
     """
-    episode_length = reward_dataset._dataset.meta.episodes[episode_id]["length"]
+    base_dataset = reward_dataset._datasets[0]
+    episode_length = base_dataset.meta.episodes[episode_id]["length"]
     
     print(f"Adding example keypoints to episode {episode_id} (length: {episode_length})...")
     
@@ -220,7 +231,7 @@ def add_example_keypoints(reward_dataset: LeRobotDatasetWithReward, episode_id: 
     # Only add keypoints that are within the episode length
     valid_keypoints = {k: v for k, v in example_keypoints.items() if k < episode_length}
     
-    reward_dataset.add_episode_rewards(episode_id, valid_keypoints)
+    reward_plugin.add_episode_rewards(episode_id, valid_keypoints)
     
     print(f"Added {len(valid_keypoints)} keypoints:")
     for frame_idx, reward in sorted(valid_keypoints.items()):
@@ -252,12 +263,17 @@ def main():
     base_dataset = LeRobotDataset(args.dataset_repo_id)
     print(f"Dataset loaded successfully. Total episodes: {base_dataset.num_episodes}")
     
-    # Wrap with reward functionality
-    reward_dataset = LeRobotDatasetWithReward(
-        base_dataset,
+    # Wrap with reward plugin
+    reward_plugin_obj = RewardPlugin(
         reward_start_pct=args.reward_start_pct,
         reward_end_pct=args.reward_end_pct
     )
+    reward_dataset = WrappedRobotDataset(base_dataset, plugins=[reward_plugin_obj])
+    
+    # Get the reward plugin instance
+    reward_plugin_instance = get_plugin_instance(reward_dataset, RewardPlugin, dataset_idx=0)
+    if reward_plugin_instance is None:
+        raise RuntimeError("Could not get reward plugin instance")
     
     # Determine which episodes to analyze
     if args.analyze_all_episodes:
@@ -284,18 +300,19 @@ def main():
         
         # Add example keypoints if requested
         if args.add_example_keypoints:
-            add_example_keypoints(reward_dataset, episode_id)
+            add_example_keypoints(reward_dataset, reward_plugin_instance, episode_id)
         
         # Analyze the episode
         stats = analyze_episode_rewards(
             reward_dataset, 
+            reward_plugin_instance,
             episode_id, 
             args.output_dir
         )
         all_stats.append(stats)
         
         # Show detailed keypoint analysis
-        visualize_keypoint_progression(reward_dataset, episode_id, args.output_dir)
+        visualize_keypoint_progression(reward_dataset, reward_plugin_instance, episode_id, args.output_dir)
     
     # Summary
     print(f"\n{'='*80}")
