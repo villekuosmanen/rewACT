@@ -80,6 +80,7 @@ from robocandywrapper.plugins import EpisodeOutcomePlugin
 from robocandywrapper.samplers import load_sampler_config
 from robocandywrapper import make_dataset
 
+from rewact.policies.rewact import RewACTPolicy, RewACTConfig
 from rewact.plugins import PiStar0_6CumulativeRewardPlugin, ControlModePlugin
 from rewact.utils import make_rewact_policy
 from rewact.policies.factory import make_pre_post_processors
@@ -261,7 +262,6 @@ def train(cfg: TrainPipelineConfig):
     torch.backends.cuda.matmul.allow_tf32 = True
 
     logging.info("Creating dataset")
-<<<<<<< HEAD
     dataset = make_dataset(cfg, plugins=[EpisodeOutcomePlugin(), ControlModePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True)])
     dataset.meta.features['observation.eef_6d_pose']= {
         'dtype': "float32",
@@ -273,22 +273,10 @@ def train(cfg: TrainPipelineConfig):
             dataset.meta.stats['observation.eef_6d_pose'][stat_key],
             dataset.meta.stats['observation.state'][stat_key][-1:]
         ])
-=======
-    dataset = make_dataset(cfg)
-    dataset = LeRobotDatasetWithReward(dataset=dataset, temporal_offset=cfg.policy.temporal_offset)
-
-    # Create environment used for evaluating checkpoints during training on simulation data.
-    # On real-world data, no need to create an environment as evaluations are done outside train.py,
-    # using the eval.py instead, with gym_dora environment and dora-rs.
-    eval_env = None
-    if cfg.eval_freq > 0 and cfg.env is not None:
-        logging.info("Creating env")
-        eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
->>>>>>> praveen-fork/main
 
     logging.info("Creating policy")
     policy = make_rewact_policy(cfg.policy, dataset.meta)
-<<<<<<< HEAD
+    policy.to(device)
 
     # Create processors - only provide dataset_stats if not resuming from saved processors
     processor_kwargs = {}
@@ -324,9 +312,6 @@ def train(cfg: TrainPipelineConfig):
         **processor_kwargs,
         **postprocessor_kwargs,
     )
-=======
-    policy.to(device)
->>>>>>> praveen-fork/main
 
     logging.info("Creating optimizer and scheduler")
     optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)

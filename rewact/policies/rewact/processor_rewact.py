@@ -62,7 +62,7 @@ def make_rewact_pre_post_processors(
     input_steps = [
         RenameObservationsProcessorStep(rename_map={}),
         AddBatchDimensionProcessorStep(),
-        DeviceProcessorStep(device=config.device),
+        DeviceProcessorStep(device='cuda'),
         NormalizerProcessorStep(
             features={**config.input_features, **config.output_features, **plugin_features},
             norm_map=config.normalization_mapping,
