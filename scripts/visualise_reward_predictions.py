@@ -19,7 +19,7 @@ from robocandywrapper.dataformats.lerobot_21 import LeRobot21Dataset
 
 from reward_wrapper import ACTPolicyWithReward, create_reward_visualization_video
 from rewact_tools import make_pre_post_processors
-from scripts.utils import make_rewact_policy
+from utils import make_rewact_policy
 
 
 def none_or_int(value):
@@ -180,7 +180,9 @@ def analyze_episode(
     timestamp_counter = 0
     for i in tqdm(range(episode_length), desc="Processing frames"):
         frame = dataset[episode_frames[i]['index'].item()]
-                
+        frame['observation.state'] = frame['observation.state.pos']
+        frame['action'] = frame['action.pos']
+
         # Prepare observation for policy (with debug on first frame)
         observation = prepare_observation_for_policy(frame, device, model_dtype, debug=(i==0))
                 
@@ -255,7 +257,7 @@ def main():
     print(f"Using device: {device}")
     
     # Load dataset
-    dataset = LeRobot21Dataset(args.dataset_repo_id)
+    dataset = LeRobotDataset(args.dataset_repo_id)
     print(f"Dataset loaded successfully. Total episodes: {dataset.num_episodes}")
 
     # Determine which episodes to analyze

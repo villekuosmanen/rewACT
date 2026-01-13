@@ -14,6 +14,7 @@
 
 from collections import deque
 from itertools import chain
+from typing import Dict
 
 import einops
 import torch
@@ -164,6 +165,28 @@ class RewACTPolicy(PreTrainedPolicy):
         current_reward_pred = torch.clamp(current_reward_pred, 0.0, 1.0)
         return current_reward_pred
 
+    def select_action_and_reward_bins(self, batch: dict[str, Tensor], force_model_run: bool = False) -> tuple[Tensor, Dict]:
+        """Select a single action given environment observations."""
+        self.eval()
+
+        if self.config.temporal_ensemble_coeff is not None:
+            actions, reward_output = self.predict_action_chunk(batch)
+            action = self.temporal_ensembler.update(actions)
+            return action, reward_output
+
+        reward_output = {}
+        # Action queue logic for n_action_steps > 1
+        if len(self._action_queue) == 0:
+            actions, reward_output = self.predict_action_chunk(batch)
+            actions = actions[:, : self.config.n_action_steps]
+
+            self._action_queue.extend(actions.transpose(0, 1))
+
+        elif force_model_run:
+            _, reward_output = self.predict_action_chunk(batch)
+
+        return self._action_queue.popleft(), reward_output
+
     @torch.no_grad()
     def predict_action_chunk(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
         """Predict a chunk of actions given environment observations."""
@@ -296,13 +319,13 @@ class RewACT(nn.Module):
             self.vae_encoder = ACTEncoder(config, is_vae_encoder=True)
             self.vae_encoder_cls_embed = nn.Embedding(1, config.dim_model)
             # Projection layer for joint-space configuration to hidden dimension.
-            if self.config.robot_state_feature:
-                self.vae_encoder_robot_state_input_proj = nn.Linear(
-                    self.config.robot_state_feature.shape[0], config.dim_model
-                )
+            # if self.config.robot_state_feature:
+            self.vae_encoder_robot_state_input_proj = nn.Linear(
+                7, config.dim_model
+            )
             # Projection layer for action (joint-space target) to hidden dimension.
             self.vae_encoder_action_input_proj = nn.Linear(
-                self.config.action_feature.shape[0],
+                7,
                 config.dim_model,
             )
             # Projection layer from the VAE encoder's output to the latent distribution's parameter space.
@@ -310,8 +333,8 @@ class RewACT(nn.Module):
             # Fixed sinusoidal positional embedding for the input to the VAE encoder. Unsqueeze for batch
             # dimension.
             num_input_token_encoder = 1 + config.chunk_size
-            if self.config.robot_state_feature:
-                num_input_token_encoder += 1
+            # if self.config.robot_state_feature:
+            num_input_token_encoder += 1
             self.register_buffer(
                 "vae_encoder_pos_enc",
                 create_sinusoidal_pos_embedding(num_input_token_encoder, config.dim_model).unsqueeze(0),
@@ -327,10 +350,10 @@ class RewACT(nn.Module):
 
         # Transformer encoder input projections. The tokens will be structured like
         # [latent, (robot_state), (env_state), (image_feature_map_pixels)].
-        if self.config.robot_state_feature:
-            self.encoder_robot_state_input_proj = nn.Linear(
-                self.config.robot_state_feature.shape[0], config.dim_model
-            )
+        # if self.config.robot_state_feature:
+        self.encoder_robot_state_input_proj = nn.Linear(
+            7, config.dim_model
+        )
         if self.config.env_state_feature:
             self.encoder_env_state_input_proj = nn.Linear(
                 self.config.env_state_feature.shape[0], config.dim_model
@@ -338,8 +361,8 @@ class RewACT(nn.Module):
         self.encoder_latent_input_proj = nn.Linear(config.latent_dim, config.dim_model)
         # Transformer encoder positional embeddings.
         n_1d_tokens = 1  # for the latent
-        if self.config.robot_state_feature:
-            n_1d_tokens += 1
+        # if self.config.robot_state_feature:
+        n_1d_tokens += 1
         if self.config.env_state_feature:
             n_1d_tokens += 1
         self.encoder_1d_feature_pos_embed = nn.Embedding(n_1d_tokens, config.dim_model)
@@ -349,7 +372,7 @@ class RewACT(nn.Module):
         self.decoder_pos_embed = nn.Embedding(config.chunk_size, config.dim_model)
 
         # Final action regression head on the output of the transformer's decoder.
-        self.action_head = nn.Linear(config.dim_model, self.config.action_feature.shape[0])
+        self.action_head = nn.Linear(config.dim_model, 7)
 
         # Distributional value prediction head: predicts distribution over bins
         self.reward_head = nn.Sequential(
@@ -400,6 +423,18 @@ class RewACT(nn.Module):
 
         batch_size = batch[OBS_IMAGES][0].shape[0] if OBS_IMAGES in batch else batch[OBS_ENV_STATE].shape[0]
 
+        # Apply proprioception dropout during training: zero out the entire proprio state
+        # for a fraction of samples to encourage reliance on image features.
+        if self.config.proprio_dropout > 0.0 and self.training:
+            # Create per-sample mask: True = keep, False = zero out
+            keep_mask = torch.rand(batch_size, device=batch[OBS_STATE].device) >= self.config.proprio_dropout
+            # Expand to (B, 1) for broadcasting with state dimension and convert to float
+            keep_mask = keep_mask.unsqueeze(-1).float()
+            # Apply mask - zeros out entire state vector for masked samples
+            obs_state = batch[OBS_STATE] * keep_mask
+        else:
+            obs_state = batch[OBS_STATE]
+
         # Prepare the latent for input to the transformer encoder.
         if self.config.use_vae and ACTION in batch and self.training:
             # Prepare the input to the VAE encoder: [cls, *joint_space_configuration, *action_sequence].
@@ -407,7 +442,7 @@ class RewACT(nn.Module):
                 self.vae_encoder_cls_embed.weight, "1 d -> b 1 d", b=batch_size
             )  # (B, 1, D)
             if self.config.robot_state_feature:
-                robot_state_embed = self.vae_encoder_robot_state_input_proj(batch[OBS_STATE])
+                robot_state_embed = self.vae_encoder_robot_state_input_proj(obs_state)
                 robot_state_embed = robot_state_embed.unsqueeze(1)  # (B, 1, D)
             action_embed = self.vae_encoder_action_input_proj(batch[ACTION])  # (B, S, D)
 
@@ -427,7 +462,7 @@ class RewACT(nn.Module):
             cls_joint_is_pad = torch.full(
                 (batch_size, 2 if self.config.robot_state_feature else 1),
                 False,
-                device=batch[OBS_STATE].device,
+                device=obs_state.device,
             )
             key_padding_mask = torch.cat(
                 [cls_joint_is_pad, batch["action_is_pad"]], axis=1
@@ -451,7 +486,7 @@ class RewACT(nn.Module):
             mu = log_sigma_x2 = None
             # TODO(rcadene, alexander-soare): remove call to `.to` to speedup forward ; precompute and use buffer
             latent_sample = torch.zeros([batch_size, self.config.latent_dim], dtype=torch.float32).to(
-                batch[OBS_STATE].device
+                obs_state.device
             )
 
         # Prepare transformer encoder inputs.
@@ -459,7 +494,7 @@ class RewACT(nn.Module):
         encoder_input_pos_embeds = list(self.encoder_1d_feature_pos_embed.weight.unsqueeze(1))
         # Robot state token.
         if self.config.robot_state_feature:
-            encoder_input_tokens.append(self.encoder_robot_state_input_proj(batch[OBS_STATE]))
+            encoder_input_tokens.append(self.encoder_robot_state_input_proj(obs_state))
         # Environment state token.
         if self.config.env_state_feature:
             encoder_input_tokens.append(

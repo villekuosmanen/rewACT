@@ -53,7 +53,7 @@ from robocandywrapper import make_dataset
 
 from rewact_tools import PiStar0_6CumulativeRewardPlugin, ControlModePlugin
 from rewact_tools import make_pre_post_processors
-from scripts.utils import make_rewact_policy
+from utils import make_rewact_policy
 
 def update_policy(
     train_metrics: MetricsTracker,
