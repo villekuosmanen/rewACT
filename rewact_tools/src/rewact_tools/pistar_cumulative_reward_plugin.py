@@ -14,6 +14,7 @@ import torch
 from robocandywrapper import DatasetPlugin, PluginInstance
 
 
+
 class PiStar0_6CumulativeRewardPluginInstance(PluginInstance):
     """
     Plugin instance that calculates cumulative rewards based on Pi*0.6 reward function.
@@ -44,6 +45,9 @@ class PiStar0_6CumulativeRewardPluginInstance(PluginInstance):
         self._norm_max = None
         self._normalization_computed = False
         
+        # Detect if meta.episodes is a dict (format 2.1) or HF dataset (newer format)
+        self._episodes_is_dict = isinstance(dataset.meta.episodes, dict)
+        
         # Create mapping from episode_idx to position in episode_data_index
         # This is needed when using a subset of episodes
         if hasattr(dataset, 'episodes') and dataset.episodes is not None:
@@ -51,6 +55,9 @@ class PiStar0_6CumulativeRewardPluginInstance(PluginInstance):
         else:
             # No subsetting, episode_idx == position
             self._episode_idx_to_pos = None
+        
+        # Cache for episode_data_index (computed lazily for datasets without it)
+        self._cached_episode_data_index = None
     
     def get_data_keys(self) -> list[str]:
         """Return the keys this plugin will add to items."""
@@ -79,6 +86,56 @@ class PiStar0_6CumulativeRewardPluginInstance(PluginInstance):
         else:
             # No subsetting, episode_idx is the position
             return episode_idx
+    
+    def _get_episode_length(self, episode_idx: int) -> int:
+        """
+        Get the length of an episode, supporting both dict (format 2.1) and HF dataset formats.
+        
+        Args:
+            episode_idx: The episode index
+            
+        Returns:
+            The length of the episode
+        """
+        if self._episodes_is_dict:
+            return self.dataset.meta.episodes[episode_idx]["length"]
+        else:
+            # HF dataset format - access by row index
+            return self.dataset.meta.episodes[episode_idx]["length"]
+    
+    def _iter_episode_indices(self):
+        """
+        Iterate over all episode indices, supporting both dict (format 2.1) and HF dataset formats.
+        
+        Yields:
+            Episode indices
+        """
+        if self._episodes_is_dict:
+            yield from self.dataset.meta.episodes.keys()
+        else:
+            # HF dataset format - iterate over row indices
+            for i in range(len(self.dataset.meta.episodes)):
+                yield i
+    
+    def _get_episode_data_index(self) -> dict[str, torch.Tensor]:
+        """
+        Get the episode data index, using cached version if available.
+        
+        Supports both dataset formats:
+        - Newer format: uses dataset.episode_data_index directly
+        - Older format: calculates from hf_dataset and caches the result
+        
+        Returns:
+            Dictionary with 'from' and 'to' tensors indicating episode boundaries
+        """
+        if hasattr(self.dataset, 'episode_data_index'):
+            return self.dataset.episode_data_index
+        
+        # Calculate and cache for datasets without episode_data_index
+        if self._cached_episode_data_index is None:
+            self._cached_episode_data_index = calculate_episode_data_index(self.dataset.hf_dataset)
+        
+        return self._cached_episode_data_index
     
     def get_item_data(
         self,
@@ -112,7 +169,8 @@ class PiStar0_6CumulativeRewardPluginInstance(PluginInstance):
         # Get episode information
         # Map episode_idx to position in episode_data_index (needed for episode subsets)
         ep_pos = self._get_episode_data_index_pos(episode_idx)
-        ep_start = self.dataset.episode_data_index["from"][ep_pos]
+        episode_data_index = self._get_episode_data_index()
+        ep_start = episode_data_index["from"][ep_pos]
         frame_index_in_episode = idx - ep_start.item()
         
         # Calculate cumulative reward for this episode if not cached
@@ -148,7 +206,7 @@ class PiStar0_6CumulativeRewardPluginInstance(PluginInstance):
             episode_idx: Episode index
             episode_outcome: True if success, False if failure
         """
-        episode_length = self.dataset.meta.episodes[episode_idx]["length"]
+        episode_length = self._get_episode_length(episode_idx)
         cumulative_rewards = np.zeros(episode_length, dtype=np.float32)
         
         if episode_outcome:  # Success
@@ -177,13 +235,13 @@ class PiStar0_6CumulativeRewardPluginInstance(PluginInstance):
         # and compute the maximum episode length among them
         max_successful_episode_length = 0
         
-        # Iterate over episode keys in meta.episodes (which is a dict)
-        for episode_idx in self.dataset.meta.episodes.keys():
+        # Iterate over episode indices (supports both dict format 2.1 and HF dataset format)
+        for episode_idx in self._iter_episode_indices():
             # We need to check if this episode is successful
             # For now, we'll compute rewards for all episodes that haven't been cached
             # This requires getting episode outcomes, which we can't easily access here
             # So we'll use a different approach: compute on first access
-            episode_length = self.dataset.meta.episodes[episode_idx]["length"]
+            episode_length = self._get_episode_length(episode_idx)
             max_successful_episode_length = max(max_successful_episode_length, episode_length)
         
         # The minimum cumulative reward in successful episodes is:
@@ -307,4 +365,57 @@ class PiStar0_6CumulativeRewardPlugin(DatasetPlugin):
             c_fail=self.c_fail,
             normalise=self.normalise,
         )
+
+def calculate_episode_data_index(hf_dataset: Any) -> dict[str, torch.Tensor]:
+    """
+    Calculate episode data index for the provided HuggingFace Dataset. Relies on episode_index column of hf_dataset.
+
+    Parameters:
+    - hf_dataset (datasets.Dataset): A HuggingFace dataset containing the episode index.
+
+    Returns:
+    - episode_data_index: A dictionary containing the data index for each episode. The dictionary has two keys:
+        - "from": A tensor containing the starting index of each episode.
+        - "to": A tensor containing the ending index of each episode.
+    """
+    episode_data_index = {"from": [], "to": []}
+
+    current_episode = None
+    """
+    The episode_index is a list of integers, each representing the episode index of the corresponding example.
+    For instance, the following is a valid episode_index:
+      [0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2]
+
+    Below, we iterate through the episode_index and populate the episode_data_index dictionary with the starting and
+    ending index of each episode. For the episode_index above, the episode_data_index dictionary will look like this:
+        {
+            "from": [0, 3, 7],
+            "to": [3, 7, 12]
+        }
+    """
+    if len(hf_dataset) == 0:
+        episode_data_index = {
+            "from": torch.tensor([]),
+            "to": torch.tensor([]),
+        }
+        return episode_data_index
+    for idx, episode_idx in enumerate(hf_dataset["episode_index"]):
+        if episode_idx != current_episode:
+            # We encountered a new episode, so we append its starting location to the "from" list
+            episode_data_index["from"].append(idx)
+            # If this is not the first episode, we append the ending location of the previous episode to the "to" list
+            if current_episode is not None:
+                episode_data_index["to"].append(idx)
+            # Let's keep track of the current episode index
+            current_episode = episode_idx
+        else:
+            # We are still in the same episode, so there is nothing for us to do here
+            pass
+    # We have reached the end of the dataset, so we append the ending location of the last episode to the "to" list
+    episode_data_index["to"].append(idx + 1)
+
+    for k in ["from", "to"]:
+        episode_data_index[k] = torch.tensor(episode_data_index[k])
+
+    return episode_data_index
 

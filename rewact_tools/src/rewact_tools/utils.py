@@ -23,7 +23,7 @@ def batch_to_transition(batch: dict[str, Any], plugin_features: dict[str, Any]) 
 
     return create_transition(
         observation=observation_keys if observation_keys else None,
-        action=batch.get(ACTION),
+        action=action,
         reward=batch.get(REWARD, 0.0),
         done=batch.get(DONE, False),
         truncated=batch.get(TRUNCATED, False),
