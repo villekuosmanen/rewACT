@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lerobot_policy_actvantage"
-version = "0.1.0"
+version = "0.1.1"
 description = "ACTvantage: Advantage-conditioned ACT policy in the style of pi*0.6 - LeRobot Policy Plugin"
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -26,6 +26,7 @@ dependencies = [
     "einops>=0.6.0",
     "torch",
     "torchvision",
+    "rewact_tools",
 ]
 
 [tool.setuptools.packages.find]
@@ -38,5 +39,6 @@ target-version = ["py38", "py39", "py310", "py311"]
 [tool.isort]
 profile = "black"
 line_length = 100
+
 
 

@@ -20,10 +20,17 @@ def batch_to_transition(batch: dict[str, Any], plugin_features: dict[str, Any]) 
     # Extract observation and complementary data keys.
     observation_keys = {k: v for k, v in batch.items() if k.startswith(OBS_PREFIX)}
     complementary_data = _extract_complementary_data(batch, plugin_features)
+    # Ensure there is no overlap between complementary data and transitions
+    for key in observation_keys.keys(): complementary_data.pop(key, None)
+    complementary_data.pop(ACTION, None)
+    complementary_data.pop(REWARD, None)
+    complementary_data.pop(DONE, None)
+    complementary_data.pop(TRUNCATED, None)
+    complementary_data.pop("info", None)
 
     return create_transition(
         observation=observation_keys if observation_keys else None,
-        action=batch.get(ACTION),
+        action=action,
         reward=batch.get(REWARD, 0.0),
         done=batch.get(DONE, False),
         truncated=batch.get(TRUNCATED, False),
@@ -51,4 +58,5 @@ def _extract_complementary_data(batch: dict[str, Any], plugin_features: dict[str
 
     complementary_data = {**pad_keys, **task_key, **index_key, **task_index_key, **plugin_features_key}
     return complementary_data if complementary_data else None
+
 

@@ -62,7 +62,7 @@ class RewACTConfig(ACTConfig):
     # Proprioception dropout: probability of zeroing out the proprioceptive state during training.
     # This encourages the model to rely more on image features which are harder to learn.
     # Set to 0.0 to disable. Recommended value: 0.3
-    proprio_dropout: float = 0.3
+    proprio_dropout: float = 0.6
 
     # Vision encoder abstraction.
     # - "resnet": torchvision resnet -> feature map -> flatten tokens (current behavior)
@@ -103,3 +103,4 @@ class RewACTConfig(ACTConfig):
         if self.vision_encoder_type == "vjepa2" and self.vjepa2:
             return self.vjepa2.temporal_offset
         return 0
+

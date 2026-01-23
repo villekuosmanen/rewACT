@@ -157,7 +157,6 @@ class RewACTPolicy(PreTrainedPolicy):
 
         return self._action_queue.popleft(), current_reward_pred
 
-
     def get_reward_pred(self, batch: dict[str, Tensor]) -> Tensor:
         """Get the reward prediction for the current batch."""
         _, reward_output = self.predict_action_chunk(batch)
@@ -556,4 +555,5 @@ class RewACT(nn.Module):
         }
 
         return actions, reward_output, (mu, log_sigma_x2)
+
 

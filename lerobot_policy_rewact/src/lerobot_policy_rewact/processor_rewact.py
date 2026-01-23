@@ -32,7 +32,7 @@ from lerobot.processor.converters import (
 )
 from lerobot.utils.constants import POLICY_POSTPROCESSOR_DEFAULT_NAME, POLICY_PREPROCESSOR_DEFAULT_NAME
 
-from .utils import create_batch_to_transition
+from rewact_tools.utils import create_batch_to_transition
 from .configuration_rewact import RewACTConfig
 
 
@@ -90,3 +90,4 @@ def make_rewact_pre_post_processors(
             to_output=transition_to_policy_action,
         ),
     )
+
