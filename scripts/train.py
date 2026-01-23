@@ -122,7 +122,7 @@ def train(cfg: TrainPipelineConfig):
         set_seed(cfg.seed)
 
     # Force pyav video decoding to avoid issues with torchcodec and GPU-accelerated video decoding in the cloud.
-    # cfg.dataset.video_backend = "pyav"
+    cfg.dataset.video_backend = "pyav"
 
     sampler_config = load_sampler_config("scripts/configs/sampler_rewact.json")
     cfg.dataset.episodes = sampler_config.episodes
@@ -133,17 +133,24 @@ def train(cfg: TrainPipelineConfig):
     torch.backends.cuda.matmul.allow_tf32 = True
 
     logging.info("Creating dataset")
-    dataset = make_dataset(cfg, plugins=[EpisodeOutcomePlugin(), ControlModePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True)])
-    dataset.meta.features['observation.eef_6d_pose']= {
-        'dtype': "float32",
-        'shape': (7,),
-    }
+    dataset = make_dataset(
+        cfg,
+        plugins=[EpisodeOutcomePlugin(), ControlModePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True)],
+        key_rename_map={
+            'action.eef_pose': 'action',
+            'observation.state.eef_pose': 'observation.state',
+        },
+    )
+    # dataset.meta.features['observation.eef_6d_pose']= {
+    #     'dtype': "float32",
+    #     'shape': (7,),
+    # }
     # Update stats to match the new shape by appending the last element from observation.state
-    for stat_key in ['min', 'max', 'mean', 'std']:
-        dataset.meta.stats['observation.eef_6d_pose'][stat_key] = np.concatenate([
-            dataset.meta.stats['observation.eef_6d_pose'][stat_key],
-            dataset.meta.stats['observation.state'][stat_key][-1:]
-        ])
+    # for stat_key in ['min', 'max', 'mean', 'std']:
+    #     dataset.meta.stats['observation.eef_6d_pose'][stat_key] = np.concatenate([
+    #         dataset.meta.stats['observation.eef_6d_pose'][stat_key],
+    #         dataset.meta.stats['observation.state'][stat_key][-1:]
+    #     ])
 
     logging.info("Creating policy")
     policy = make_rewact_policy(cfg.policy, dataset.meta)
@@ -164,9 +171,6 @@ def train(cfg: TrainPipelineConfig):
                 "features": {**policy.config.input_features, **policy.config.output_features},
                 "norm_map": policy.config.normalization_mapping,
             },
-        }
-        processor_kwargs["preprocessor_overrides"]["rename_observations_processor"] = {
-            "rename_map": cfg.rename_map
         }
         postprocessor_kwargs["postprocessor_overrides"] = {
             "unnormalizer_processor": {
@@ -260,10 +264,6 @@ def train(cfg: TrainPipelineConfig):
         batch = next(dl_iter)
         batch = preprocessor(batch)
         train_tracker.dataloading_s = time.perf_counter() - start_time
-
-        for key in batch:
-            if isinstance(batch[key], torch.Tensor):
-                batch[key] = batch[key].to(device, non_blocking=device.type == "cuda")
 
         train_tracker, output_dict = update_policy(
             train_tracker,
