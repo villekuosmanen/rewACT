@@ -103,3 +103,4 @@ class RewACTConfig(ACTConfig):
         if self.vision_encoder_type == "vjepa2" and self.vjepa2:
             return self.vjepa2.temporal_offset
         return 0
+

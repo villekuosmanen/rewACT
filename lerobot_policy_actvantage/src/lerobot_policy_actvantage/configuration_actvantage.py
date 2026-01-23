@@ -24,3 +24,4 @@ class ACTvantageConfig(ACTConfig):
     value_min: int = 0
     value_max: int = 1
 
+
