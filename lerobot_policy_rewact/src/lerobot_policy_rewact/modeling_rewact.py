@@ -219,10 +219,10 @@ class RewACTPolicy(PreTrainedPolicy):
         # For action loss, we calculate a combined mask using the use_action_mask and action_is_pad, episode_outcome, as well as control_mode != "policy"
         # action_is_pad and use_action_mask have shape (B, chunk_size), episode_outcome and control_mode have shape (B,)
         # We need to expand all to (B, chunk_size, 1) for proper broadcasting with action predictions
-        action_mask = (~batch["action_is_pad"].unsqueeze(-1)) & batch["use_action_mask"].unsqueeze(-1).unsqueeze(-1)
-        # if "episode_outcome" in batch:
-        #     # Expand (B,) -> (B, 1, 1) to broadcast across chunk_size dimension
-        #     action_mask = action_mask & (batch["episode_outcome"].unsqueeze(-1).unsqueeze(-1))
+        action_mask = ~batch["action_is_pad"].unsqueeze(-1)
+        if "episode_outcome" in batch:
+            # Expand (B,) -> (B, 1, 1) to broadcast across chunk_size dimension
+            action_mask = action_mask & (batch["episode_outcome"].unsqueeze(-1).unsqueeze(-1))
         if "control_mode_autonomous" in batch:
             # Expand (B,) -> (B, 1, 1) to broadcast across chunk_size dimension
             action_mask = action_mask & (~batch["control_mode_autonomous"].squeeze().unsqueeze(-1).unsqueeze(-1))

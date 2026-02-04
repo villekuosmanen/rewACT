@@ -137,8 +137,8 @@ def train(cfg: TrainPipelineConfig):
         cfg,
         plugins=[EpisodeOutcomePlugin(), ControlModePlugin(), PiStar0_6CumulativeRewardPlugin(normalise=True)],
         key_rename_map={
-            'action.eef_pose': 'action',
-            'observation.state.eef_pose': 'observation.state',
+            'action.pos': 'action',
+            'observation.state.pos': 'observation.state',
         },
     )
     # dataset.meta.features['observation.eef_6d_pose']= {

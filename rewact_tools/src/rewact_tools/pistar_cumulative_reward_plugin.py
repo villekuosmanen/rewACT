@@ -188,14 +188,12 @@ class PiStar0_6CumulativeRewardPluginInstance(PluginInstance):
         
         # Calculate action masking (similar to DenseRewardPlugin)
         repo_name = self.dataset.repo_id.split('/')[1] if '/' in self.dataset.repo_id else self.dataset.repo_id
-        use_action_mask = True
         
         # For simplicity, we'll keep action masking consistent with DenseRewardPlugin
         # This can be parameterized if needed
         
         return {
             "reward": torch.tensor(cumulative_reward, dtype=torch.float32),
-            "use_action_mask": torch.tensor(use_action_mask, dtype=torch.bool)
         }
     
     def _compute_episode_cumulative_rewards(self, episode_idx: int, episode_outcome: bool):

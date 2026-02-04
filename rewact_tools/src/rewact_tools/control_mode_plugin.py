@@ -10,7 +10,7 @@ import json
 import torch
 import warnings
 from pathlib import Path
-from robocandywrapper import DatasetPlugin, PluginInstance
+from robocandywrapper import DatasetPlugin, PluginInstance, CANDYWRAPPER_PLUGINS_DIR
 
 
 # Control mode constants
@@ -242,7 +242,7 @@ class ControlModePlugin(DatasetPlugin):
                 episode_modes_file = None
             
             if dataset_root:
-                episode_modes_file = dataset_root / "dagger_data_source" / "episode_modes.json"
+                episode_modes_file = dataset_root / CANDYWRAPPER_PLUGINS_DIR / "dagger_data_source" / "episode_modes.json"
         else:
             episode_modes_file = self.episode_modes_file
         
