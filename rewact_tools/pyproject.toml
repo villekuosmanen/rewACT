@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rewact_tools"
-version = "0.1.1"
+version = "0.1.2"
 description = "RewACT Tools: Plugins and utilities for reward-based learning with LeRobot"
 readme = "README.md"
 license = {file = "LICENSE"}
