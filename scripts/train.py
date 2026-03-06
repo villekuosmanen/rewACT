@@ -206,21 +206,6 @@ def train(cfg: TrainPipelineConfig):
     logging.info(f"{num_learnable_params=} ({format_big_number(num_learnable_params)})")
     logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
 
-    # Benchmarking data loading performance
-    # Test single batch load speed
-    import time
-    test_dataset = dataset
-    print(f"Dataset length: {len(test_dataset)}")
-    start = time.perf_counter()
-    sample = test_dataset[0]
-    print(f"Single sample load: {time.perf_counter() - start:.3f}s")
-    start = time.perf_counter()
-    sample = test_dataset[0]
-    print(f"Same sample load twice: {time.perf_counter() - start:.3f}s")
-    start = time.perf_counter()
-    sample = test_dataset[1000]
-    print(f"Second sample load: {time.perf_counter() - start:.3f}s")
-
     # create dataloader for offline training
     if hasattr(cfg.policy, "drop_n_last_frames"):
         shuffle = False

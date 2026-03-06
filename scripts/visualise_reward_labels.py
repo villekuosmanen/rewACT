@@ -14,12 +14,26 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from robocandywrapper import WrappedRobotDataset
+from robocandywrapper.factory import make_dataset_without_config
 from robocandywrapper.plugins import EpisodeOutcomePlugin
 
-from rewact_tools import DenseRewardPlugin, PiStar0_6CumulativeRewardPlugin, get_plugin_instance
+from rewact_tools import LabelledRewardPlugin, PiStar0_6CumulativeRewardPlugin, get_plugin_instance
+from rewact_tools.control_mode_plugin import calculate_episode_data_index
 from reward_wrapper import create_reward_visualization_video
+
+
+_cached_episode_data_index: dict[str, torch.Tensor] | None = None
+
+
+def get_episode_data_index(raw_dataset) -> dict[str, torch.Tensor]:
+    """Return episode_data_index, computing and caching it if necessary."""
+    global _cached_episode_data_index
+    if hasattr(raw_dataset, "episode_data_index"):
+        return raw_dataset.episode_data_index
+    if _cached_episode_data_index is None:
+        _cached_episode_data_index = calculate_episode_data_index(raw_dataset.hf_dataset)
+    return _cached_episode_data_index
 
 
 def extract_images_from_frame(frame: dict) -> List[torch.Tensor]:
@@ -69,7 +83,7 @@ def analyze_episode_rewards(
     
     # Get episode information
     episode_length = reward_dataset._datasets[0].meta.episodes[episode_id]["length"]
-    episode_start_idx = reward_dataset._datasets[0].episode_data_index["from"][episode_id].item()
+    episode_start_idx = get_episode_data_index(reward_dataset._datasets[0])["from"][episode_id].item()
     
     print(f"Analyzing episode {episode_id} with {episode_length} frames")
     
@@ -196,7 +210,7 @@ def visualize_keypoint_progression(
     
     # Show interpolated reward curve
     print(f"\nInterpolated reward progression (every 10 frames):")
-    episode_start_idx = reward_dataset._datasets[0].episode_data_index["from"][episode_id].item()
+    episode_start_idx = get_episode_data_index(reward_dataset._datasets[0])["from"][episode_id].item()
     
     for frame_idx in range(0, episode_length, 10):
         global_idx = episode_start_idx + frame_idx
@@ -251,12 +265,14 @@ def main():
                         help="Episode ID to analyze (if not specified, analyzes first episode)")
     parser.add_argument("--output-dir", type=str, default="outputs",
                         help="Directory to save output videos")
+    parser.add_argument("--reward-type", type=str, default="cumulative",
+                        choices=["cumulative", "labelled"],
+                        help="Reward source: 'cumulative' for PiStar0.6 cumulative rewards, "
+                             "'labelled' for pre-computed rewards from parquet files (e.g. TOPReward)")
+    parser.add_argument("--rewards-dir", type=str, default=None,
+                        help="Directory with labelled reward parquets (only used with --reward-type labelled)")
     parser.add_argument("--add-example-keypoints", action="store_true",
                         help="Add example keypoints to the episode for demonstration")
-    parser.add_argument("--reward-start-pct", type=float, default=0.05,
-                        help="Fallback reward start percentage")
-    parser.add_argument("--reward-end-pct", type=float, default=0.95,
-                        help="Fallback reward end percentage")
     parser.add_argument("--analyze-all-episodes", action="store_true",
                         help="Analyze all episodes in the dataset")
     
@@ -264,21 +280,23 @@ def main():
     
     print(f"Loading dataset: {args.dataset_repo_id}")
     
-    # Load dataset
-    base_dataset = LeRobotDataset(args.dataset_repo_id)
+    # Build plugins for the selected reward type
+    if args.reward_type == "cumulative":
+        reward_plugin_obj = PiStar0_6CumulativeRewardPlugin(normalise=True)
+        plugins = [EpisodeOutcomePlugin(), reward_plugin_obj]
+        reward_plugin_class = PiStar0_6CumulativeRewardPlugin
+    elif args.reward_type == "labelled":
+        reward_plugin_obj = LabelledRewardPlugin(rewards_dir=args.rewards_dir)
+        plugins = [reward_plugin_obj]
+        reward_plugin_class = LabelledRewardPlugin
+    else:
+        raise ValueError(f"Unknown reward type: {args.reward_type}")
+
+    reward_dataset = make_dataset_without_config(args.dataset_repo_id, plugins=plugins)
+    base_dataset = reward_dataset._datasets[0]
     print(f"Dataset loaded successfully. Total episodes: {base_dataset.num_episodes}")
-    
-    # Wrap with reward plugin
-    # reward_plugin_obj = DenseRewardPlugin(
-    #     reward_start_pct=args.reward_start_pct,
-    #     reward_end_pct=args.reward_end_pct
-    # )
-    reward_plugin_obj = PiStar0_6CumulativeRewardPlugin(normalise=True)
-    reward_dataset = WrappedRobotDataset(base_dataset, plugins=[EpisodeOutcomePlugin(), reward_plugin_obj])
-    
-    # Get the reward plugin instance
-    reward_plugin_instance = get_plugin_instance(reward_dataset, PiStar0_6CumulativeRewardPlugin, dataset_idx=0)
-    # reward_plugin_instance = get_plugin_instance(reward_dataset, DenseRewardPlugin, dataset_idx=0)
+
+    reward_plugin_instance = get_plugin_instance(reward_dataset, reward_plugin_class, dataset_idx=0)
     if reward_plugin_instance is None:
         raise RuntimeError("Could not get reward plugin instance")
     
@@ -312,7 +330,6 @@ def main():
         # Analyze the episode
         stats = analyze_episode_rewards(
             reward_dataset, 
-            reward_plugin_instance,
             episode_id, 
             args.output_dir
         )
