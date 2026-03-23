@@ -98,36 +98,68 @@ class ACTvantagePolicy(PreTrainedPolicy):
             self._action_queue = deque([], maxlen=self.config.n_action_steps)
 
     @torch.no_grad()
-    def select_action(self, batch: dict[str, Tensor]) -> Tensor:
-        """Select a single action given environment observations."""
+    def select_action(self, batch: dict[str, Tensor], gamma: float | None = None) -> Tensor:
+        """Select a single action given environment observations.
+
+        Args:
+            batch: Observation dict.
+            gamma: If provided, use classifier-free guidance with this scale.
+                   The guided action is: a_uncond + gamma * (a_cond - a_uncond).
+        """
         self.eval()
 
+        predict_fn = (
+            lambda b: self.predict_action_chunk_cfg(b, gamma=gamma)
+            if gamma is not None
+            else self.predict_action_chunk
+        )
+
         if self.config.temporal_ensemble_coeff is not None:
-            actions = self.predict_action_chunk(batch)
+            actions = predict_fn(batch)
             action = self.temporal_ensembler.update(actions)
             return action
 
         # Action queue logic for n_action_steps > 1
         if len(self._action_queue) == 0:
-            actions = self.predict_action_chunk(batch)
+            actions = predict_fn(batch)
             actions = actions[:, : self.config.n_action_steps]
             self._action_queue.extend(actions.transpose(0, 1))
 
         return self._action_queue.popleft()
 
     @torch.no_grad()
-    def predict_action_chunk(self, batch: dict[str, Tensor]) -> Tensor:
-        """Predict a chunk of actions given environment observations."""
+    def predict_action_chunk(self, batch: dict[str, Tensor], advantage_value: float = 1.0) -> Tensor:
+        """Predict a chunk of actions given environment observations.
+
+        Args:
+            batch: Observation dict (not mutated).
+            advantage_value: Scalar advantage to condition on (default 1.0).
+        """
         self.eval()
 
-        batch["advantage"] = torch.ones((1, 1), device=self.model.device)
-        # batch["advantage"] = torch.neg(torch.ones((1, 1), device=self.model.device)) # FOR DEBUG
+        batch = dict(batch)
+        batch["advantage"] = torch.full((1, 1), advantage_value, device=batch[OBS_STATE_KEY].device)
         if self.config.image_features:
-            batch = dict(batch)
             batch[OBS_IMAGES] = [batch[key] for key in self.config.image_features]
 
         actions, _ = self.model(batch)
         return actions
+
+    @torch.no_grad()
+    def predict_action_chunk_cfg(self, batch: dict[str, Tensor], gamma: float = 3.0) -> Tensor:
+        """Predict actions using classifier-free guidance.
+
+        Queries the model twice — once with advantage=0 (unconditional) and once
+        with advantage=1 (conditional) — then applies:
+            actions = a_uncond + gamma * (a_cond - a_uncond)
+
+        Args:
+            batch: Observation dict (not mutated).
+            gamma: Guidance scale factor.
+        """
+        actions_uncond = self.predict_action_chunk(batch, advantage_value=0.0)
+        actions_cond = self.predict_action_chunk(batch, advantage_value=1.0)
+        return actions_uncond + gamma * (actions_cond - actions_uncond)
 
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
         """Run the batch through the model and compute the loss for training or validation."""
