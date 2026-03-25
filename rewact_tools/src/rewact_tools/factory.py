@@ -1,6 +1,9 @@
+import importlib
+import logging
 from typing import Any
 from typing_extensions import Unpack
 
+import torch
 from lerobot.processor import PolicyProcessorPipeline, PolicyAction, batch_to_transition, transition_to_batch
 from lerobot.processor.converters import (
     policy_action_to_transition,
@@ -78,9 +81,50 @@ def make_pre_post_processors(
             plugin_features=plugin_features,
         )
     else:
-        raise NotImplementedError(f"Processor for policy type '{policy_cfg.type}' is not implemented.")
+        try:
+            processors = _make_processors_from_policy_config(
+                config=policy_cfg,
+                dataset_stats=kwargs.get("dataset_stats"),
+                plugin_features=plugin_features,
+            )
+        except Exception as e:
+            raise ValueError(f"Processor for policy type '{policy_cfg.type}' is not implemented.") from e
+
 
     return processors
 
 
+def _make_processors_from_policy_config(
+    config: PreTrainedConfig,
+    dataset_stats: dict[str, dict[str, torch.Tensor]] | None = None,
+    plugin_features: dict[str, Any] | None = None,
+) -> tuple[Any, Any]:
+    """Create pre- and post-processors from a policy configuration using dynamic imports.
 
+    This is used as a helper function to import processor factories from 3rd party lerobot plugins.
+
+    Args:
+        config: The policy configuration object.
+        dataset_stats: Dataset statistics for normalization.
+        plugin_features: Features added by plugins (passed through if the
+            processor factory accepts it; silently omitted otherwise).
+    Returns:
+        A tuple containing the input (pre-processor) and output (post-processor) pipelines.
+    """
+    import inspect
+
+    policy_type = config.type
+    function_name = f"make_{policy_type}_pre_post_processors"
+    module_path = config.__class__.__module__.replace(
+        "configuration_", "processor_"
+    )
+    logging.debug(
+        f"Instantiating pre/post processors using function '{function_name}' from module '{module_path}'"
+    )
+    module = importlib.import_module(module_path)
+    function = getattr(module, function_name)
+
+    sig = inspect.signature(function)
+    if "plugin_features" in sig.parameters:
+        return function(config, dataset_stats=dataset_stats, plugin_features=plugin_features)
+    return function(config, dataset_stats=dataset_stats)
