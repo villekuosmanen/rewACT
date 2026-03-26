@@ -33,6 +33,7 @@ def make_pre_post_processors(
     policy_cfg: PreTrainedConfig,
     pretrained_path: str | None = None,
     plugin_features: dict[str, Any] | None = None,
+    delta_norm_stats: dict | None = None,
     **kwargs: Unpack[ProcessorConfigKwargs],
 ) -> tuple[
     PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
@@ -86,6 +87,7 @@ def make_pre_post_processors(
                 config=policy_cfg,
                 dataset_stats=kwargs.get("dataset_stats"),
                 plugin_features=plugin_features,
+                delta_norm_stats=delta_norm_stats,
             )
         except Exception as e:
             raise ValueError(f"Processor for policy type '{policy_cfg.type}' is not implemented.") from e
@@ -98,6 +100,7 @@ def _make_processors_from_policy_config(
     config: PreTrainedConfig,
     dataset_stats: dict[str, dict[str, torch.Tensor]] | None = None,
     plugin_features: dict[str, Any] | None = None,
+    delta_norm_stats: dict | None = None,
 ) -> tuple[Any, Any]:
     """Create pre- and post-processors from a policy configuration using dynamic imports.
 
@@ -125,6 +128,9 @@ def _make_processors_from_policy_config(
     function = getattr(module, function_name)
 
     sig = inspect.signature(function)
+    extra_kwargs = {}
     if "plugin_features" in sig.parameters:
-        return function(config, dataset_stats=dataset_stats, plugin_features=plugin_features)
-    return function(config, dataset_stats=dataset_stats)
+        extra_kwargs["plugin_features"] = plugin_features
+    if "delta_norm_stats" in sig.parameters and delta_norm_stats is not None:
+        extra_kwargs["delta_norm_stats"] = delta_norm_stats
+    return function(config, dataset_stats=dataset_stats, **extra_kwargs)
