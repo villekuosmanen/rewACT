@@ -1,5 +1,5 @@
 from typing import Any, Callable
-from lerobot.processor.core import EnvTransition
+from lerobot.processor import EnvTransition
 from lerobot.processor import PolicyAction
 from lerobot.processor.converters import create_transition
 from lerobot.utils.constants import ACTION, OBS_PREFIX, REWARD, DONE, TRUNCATED
