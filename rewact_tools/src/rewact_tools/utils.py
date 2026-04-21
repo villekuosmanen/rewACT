@@ -1,6 +1,5 @@
 from typing import Any, Callable
-from lerobot.processor import EnvTransition
-from lerobot.processor import PolicyAction
+from lerobot.processor import EnvTransition, PolicyAction
 from lerobot.processor.converters import create_transition
 from lerobot.utils.constants import ACTION, OBS_PREFIX, REWARD, DONE, TRUNCATED
 
@@ -54,7 +53,7 @@ def _extract_complementary_data(batch: dict[str, Any], plugin_features: dict[str
     task_key = {"task": batch["task"]} if "task" in batch else {}
     index_key = {"index": batch["index"]} if "index" in batch else {}
     task_index_key = {"task_index": batch["task_index"]} if "task_index" in batch else {}
-    plugin_features_key = {k: batch[k] for k in plugin_features.keys() if k in batch}
+    plugin_features_key = {k: batch[k] for k in plugin_features.keys() if k in batch} if plugin_features else {}
 
     complementary_data = {**pad_keys, **task_key, **index_key, **task_index_key, **plugin_features_key}
     return complementary_data if complementary_data else {}
